@@ -1,0 +1,150 @@
+
+library(tidyverse)
+library(ggplot2)
+library(ggpubr)
+library(RColorBrewer)
+library(lemon)
+library(readxl)
+
+## Set working directory 
+setwd("/Users/emelinepa/Documents/University/4th_semester/Metaphlan/Meta_transcriptome/alpha_diversity")
+
+## Download the data 
+Meta_data_shannon <- read.table("merged_abundance_table_shannon.tsv", header=T, na.strings="", sep="\t", stringsAsFactors=FALSE)
+Meta_data_simpson <- read.table("merged_abundance_table_simpson.tsv", header=T, na.strings="", sep="\t", stringsAsFactors=FALSE)
+
+merged_data <- cbind(Meta_data_shannon, Meta_data_simpson)
+merged_data <- rownames_to_column(merged_data)
+names(merged_data)[1] <- "Sample"
+
+info <- read_excel("/Users/emelinepa/Documents/University/4th_semester/Metaphlan/Meta_transcriptome/datasets/MT_Cecum_samples_2024_phenotypes.xlsx")
+colnames(info)[-1] <- merged_data[,1]
+
+## convert the data to long format}
+Meta_data_long <- 
+  pivot_longer(merged_data, 
+  cols = -contains("Sample"), # columns argument, required
+  names_to = "methods",
+  values_to = "alpha")
+
+info <- as.data.frame(t(info))
+colnames(info) <- info[1,]
+info <- info[-1,]
+info <- info[,-6]
+info <- rownames_to_column(info)
+colnames(info)[1] <- "Sample"
+Age_group <- info[6]
+Age_group <- as.numeric(Age_group$Age)
+Age_group <- cut(Age_group, breaks= c(0,509,1017), labels=c('Young','Old'))
+Age_group <- as.data.frame(Age_group)
+info <- cbind(info, Age_group)
+
+result_long_1 <- left_join(Meta_data_long, info %>% select(Sample, Age, Age_group, Diet), by = "Sample")
+
+
+# plot the violin_chart}
+ggviolin(result_long_1, x="Diet", y="alpha",fill="Diet",
+         add ="boxplot") +
+  scale_fill_brewer(palette = "Accent") +
+  stat_compare_means(label = c("p.signif"), #"p.signif", "p.format"
+                     size = 5,
+                     method = "t.test") +
+  facet_rep_grid(methods~Age_group,scales = "free_y") + 
+  theme_bw() + 
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),  
+        axis.title.x = element_blank(),
+        panel.grid = element_blank()) +
+  scale_y_continuous(expand = c(0.15, 0.02))
+
+ggviolin(result_long_1, x="Diet", y="alpha",fill="Diet",
+         add ="boxplot") +
+  scale_fill_brewer(palette = "Accent") +
+  stat_compare_means(label = c("p.signif"), #"p.signif", "p.format"
+                     size = 5,
+                     method = "t.test") +
+  facet_wrap(~interaction(methods, Age_group), scales = "free_y", nrow = 2) + 
+  theme_bw() + 
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),  
+        axis.title.x = element_blank(),
+        panel.grid = element_blank(),
+        panel.border=element_blank(), 
+        axis.line=element_line()) +
+  scale_y_continuous(expand = c(0.15, 0.02))
+
+ # facet_wrap(~interaction(methods, Age_group), scales = "free_y", nrow = 2) + 
+ # theme_bw()
+ # theme(panel.border=element_blank(), axis.line=element_line())
+
+ggviolin(result_long_1, x="Diet", y="alpha",fill="Diet",
+         add ="boxplot") +
+  scale_fill_brewer(palette = "Accent") +
+  stat_compare_means(label = c("p.signif"), #"p.signif", "p.format"
+                     size = 5,
+                     method = "t.test") +
+  facet_rep_grid(~methods,scales = "free_y") + 
+  theme_bw() + 
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),  
+        axis.title.x = element_blank(),
+        panel.grid = element_blank()) +
+  scale_y_continuous(expand = c(0.15, 0.02))
+
+
+## calculate the p-values for alpha-diversity between CD and HF}
+Meta_CD <- result_long_1 %>% subset(Diet == "CD")
+Meta_HF <- result_long_1 %>% subset(Diet == "HF")
+
+Meta_CD_shannon <- Meta_CD %>% subset(methods == "diversity_shannon")
+Meta_CD_simpson <- Meta_CD %>% subset(methods == "diversity_gini_simpson")
+Meta_HF_shannon <- Meta_HF %>% subset(methods == "diversity_shannon")
+Meta_HF_simpson <- Meta_HF %>% subset(methods == "diversity_gini_simpson")
+
+ttest_shannon <- t.test(Meta_CD_shannon$alpha, Meta_HF_shannon$alpha)
+ttest_simpson <- t.test(Meta_CD_simpson$alpha, Meta_HF_simpson$alpha)
+p_value <- ttest_shannon$p.value
+p_value <- rbind(p_value, ttest_simpson$p.value)
+rownames(p_value) <- c("shannon","simpson")
+
+
+## set the parameters of the plot}
+top.mar <- 0.2
+right.mar <- 0.2
+bottom.mar <- 0.2
+left.mar <- 0.2
+
+mytheme <- theme_bw() +
+  theme(panel.grid = element_blank(),
+        axis.text.x = element_text(hjust=1,
+                                   vjust = 1),
+        plot.margin = unit(x = c(top.mar, 
+                                 right.mar, 
+                                 bottom.mar, 
+                                 left.mar), 
+                           units="inches"))
+
+result_long_1$Age <- as.numeric(result_long_1$Age)
+Meta_CD$Age <- as.numeric(Meta_CD$Age)
+Meta_HF$Age <- as.numeric(Meta_HF$Age)
+
+# plot the bubble_chart}
+ggplot(result_long_1, aes(Age, alpha))+
+  geom_point(aes(Age, alpha),
+             size=1,
+             color=NA,
+             fill=NA)+
+  geom_point(data= Meta_CD,aes(Age, alpha,
+                               size = Age,
+                               color = Age), 
+             shape=16, show.legend=T)+
+  geom_point(data= Meta_HF,aes(Age, alpha,
+                               size = Age,
+                               fill = Age),
+             shape=21, stroke=0, color="black", show.legend=T)+
+  scale_color_gradient(low = "#D6FFD4",high = "#7CC17E")+   #7CC17C
+  scale_fill_gradient(low = "#DBD4FF",high = "#BAABD9")+
+  labs(size="Time on diet (days)",fill="HF",color="CD") +
+  facet_wrap(~methods, scales = "free", ncol = 2) +
+  scale_y_continuous(expand = c(0.03, 0.03)) +
+  mytheme
