@@ -1,0 +1,65 @@
+### Setting up the HPC for Metagenomic and Metatranscriptomic analysis 
+
+
+#---------------------------------------------------------------------
+## Installation of Miniconada 
+
+wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+bash Miniconda3-latest-Linux-x86_64.sh
+
+# Welcome to Miniconda3
+
+#In order to continue the installation process, please review the license agreement.
+#Please, press ENTER to continue
+#.....
+#Miniconda3 will now be installed into this location:
+#/shared/homes/xxxxxxx/miniconda3
+#.....
+#PREFIX=/shared/homes/xxxxxx/miniconda3
+#installing: base environment ...
+#.......
+# Press ENTER until you see 
+#Do you wish the installer to initialize Miniconda3 by running conda init? [yes|no] 
+
+[no] >>>
+
+# To check if the installation succeeded 
+conda activate base
+conda deactivate
+
+#---------------------------------------------------------------------
+## Installation of kneaddata
+
+# Containers installed by Julien on the HPC system
+# https://gitlab.uni.lu/hlst/ulhpc-containers/-/tree/main/ulhpc-containers/kneaddata
+
+# Everything is installed by Julien in the ulhpc-container, we don't need to install it ourself 
+# If it is not working install kneaddata with:
+
+pip install kneaddata
+
+# Then you also have to download the kneaddata_database for robosomial_RNA and mouse_C57BL DNA 
+
+# DB1 -> ribosomal_RNA : bowtie2 = http://huttenhower.sph.harvard.edu/kneadData_databases/SILVA_128_LSUParc_SSUParc_ribosomal_RNA_v0.2.tar.gz
+# DB2 -> mouse_C57BL : bowtie2 = http://huttenhower.sph.harvard.edu/kneadData_databases/mouse_C57BL_6NJ_Bowtie2_v0.1.tar.gz
+
+#---------------------------------------------------------------------
+## Installation of MetaPhlAn4
+
+conda create --name metaphlan python=3.7
+source activate metaphlan # Or should be conda activate 
+pip install metaphlan 
+module load bio/Bowtie2/2.4.2-GCC-10.2.0 # this may not always be the most recent version! if it fails, just load bio/Bowtie2
+metaphlan --install --bowtie2db /your/database/INPUT_FOLDER # This database of several files is downloaded from the metaphlan website, about 20GB total
+conda deactivate
+
+# This takes a long time (XX MIN) so make sure to use a long-term interactive shell or submit as a batch job. If you already downloaded it, this should workcd ..
+metaphlan --install --index mpa_vOct22_CHOCOPhlAnSGB_202212 --bowtie2db /scratch/users/HPCID/ENTER/envs/metaphlan/lib/python3.7/site-packages/metaphlan/metaphlan_databases/
+
+#---------------------------------------------------------------------
+## Installation of Biobakery3
+# For further information check: https://huttenhower.sph.harvard.edu/humann/
+
+conda create --name biobakery3 python=3.7
+conda activate biobakery3
+conda install humann -c biobakery
