@@ -1,0 +1,98 @@
+## MetaPhlan4 Workflow
+
+
+
+#---------------------------------------------------------------------
+## The File you need to run the following code is: SAMPLE_kneaddata.fastq
+
+# 1st enter the following directory 
+
+cd /scratch/users/HPC_ID/ENTER/envs/metaphlan/lib/python3.7/site-packages/metaphlan/metaphlan_databases/
+
+#---------------------------------------------------------------------
+
+# Create file 
+
+
+#!/bin/bash -l
+## Run MetaPhlAn4 using:
+#!/bin/bash -l
+#SBATCH -J MetaPhlAn4
+#SBATCH -N 1
+#SBATCH --ntasks-per-node=1
+#SBATCH -c 128
+#SBATCH --time=0-12:00:00
+#SBATCH -p batch
+#SBATCH --qos=normal
+#SBATCH --mail-type=fail
+#SBATCH --mail-user=arianna.lamanna@uni.lu
+
+INPUT_FOLDER=/scratch/users/alamanna/test_output_singularity/ # This is the output of kneaddata
+INPUT_FILE=C_271_EKDN230049432-1A_H27HGDSXC_L4_1_kneaddata.fastq   # This is called *1_kneaddata.fastq, it should be the largest and final fastq file creat$
+OUTPUT_FILE=C_271_EKDN230049432-1A_H27HGDSXC_L4_1_kneaddata_metaphlan4.txt # This will create a small txt file for that sample, all of the taxa and its cou$
+
+
+conda activate metaphlan
+
+srun 
+metaphlan $INPUT_FOLDER/$INPUT_FILE \
+    --input_type fastq \
+    -o /scratch/users/alamanna/output_file/folder/$OUTPUT_FILE
+conda deactivate
+
+#---------------------------------------------------------------------
+
+## To run the file 
+
+
+sbatch -J MetaPhlAn4 -N 1 --ntasks-per-node=1 -c 14 --time=0-12:00:00 -p batch --qos=normal --mail-type=end,fail --mail-user=YOUR_EMAIL MetaPhlAn4.sh
+
+# Takes 5 min to 1h30 depending on samples 
+
+## Now you should obtained a folder with 1 file per samples: SAMPLE_kneaddata_metaphlan4.txt
+
+#---------------------------------------------------------------------
+
+## Merge the samples together using: merge_metaphlan_tables.py (usually automatically downloaded when instaling MetaPhlan4, if not the case the function can be found https://github.com/biobakery/MetaPhlAn/blob/master/metaphlan/utils/calculate_diversity.R)
+
+merge_metaphlan_tables.py *_kneaddata_metaphlan4.txt > merged_abundance_table.txt # Can change the name of the output file
+
+# Output is one single file with all the samples merged together 
+
+# This file can now be dowloaded on the computer and work in RStudio
+
+rsync --rsh='ssh -p 8022' -avp HPC_ID@access-iris.uni.lu:HPC_WORKING_DIRECTORY/FILE_NAME COMPUTER_DIRECTORY
+
+#---------------------------------------------------------------------
+
+## Taxa analysis 
+
+# Refer to EP_Metaphlan4_taxonomy_analysis.R in GitLab
+
+#---------------------------------------------------------------------
+
+## Alpha diversity 
+
+# On the HPC
+
+# Calculate the alpha diversity using: calculate_diversity.R (usually automatically downloaded when instaling MetaPhlan4, if not the case the function can be found https://github.com/biobakery/MetaPhlAn/blob/master/metaphlan/utils/calculate_diversity.R) 
+
+# Work where the files merged_abundance_table.txt are located
+
+module load lang/R 
+
+Rscript calculate_diversity.R -f merged_abundance_table.txt -d alpha shannon 
+
+Rscript calculate_diversity.R -f merged_abundance_table.txt -d alpha simpson
+
+# Obtain 2 files: merged_abundance_table_shannon.txt, merged_abundance_table_simpson.txt
+
+# Thoses files can now be dowloaded on the computer and work in RStudio
+
+rsync --rsh='ssh -p 8022' -avp HPC_ID@access-iris.uni.lu:HPC_WORKING_DIRECTORY/FILE_NAME COMPUTER_DIRECTORY
+
+#---------------------------------------------------------------------
+
+## Alpha diversity analysis 
+
+# Refer to EP_alpha_diversity.R in GitLab
