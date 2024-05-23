@@ -1,0 +1,71 @@
+## HUMANn3 Workflow
+
+#---------------------------------------------------------------------
+# Create file
+
+#!/bin/bash -l
+#sbatch -J Humann -N 1 --ntasks-per-node=1 -c 14 --time=0-24:00:00 -p batch --qos=normal --mail-type=end,fail --mail-user=emeline.pansart.002@student.uni.lu test_humann3_3.sh
+
+cd /home/users/alamanna
+
+conda activate biobakery3
+
+humann -i /scratch/users/epansart/kneaddataOUT/C_155_CD_MT_CECUM_GEM_S11_R1_001_kneaddata.fastq -o sample_results
+
+conda deactivate
+
+
+
+#---------------------------------------------------------------------
+
+# To run the file: 
+
+sbatch -J Humann -N 1 --ntasks-per-node=1 -c 14 --time=0-24:00:00 -p batch --qos=normal --mail-type=end,fail --mail-user=YOUR_EMAIL test_humann3_3.sh
+# It takes from 15 min to 1h30 depending on samples
+
+# We obtain 3 different files: SAMPLE_genefamilies.tsv, SAMPLE_pathabundance.tsv, SAMPLE_pathcoverage.tsv
+
+#---------------------------------------------------------------------
+# Classify each file of each sample based on its properties in different folders
+# join all the samples together
+
+conda activate biobakery3
+
+humann_join_tables -i genefamilies_file -o OUTPUT_FILE_NAME --file_name genefamilies
+humann_join_tables -i pathabundance_file -o OUTPUT_FILE_NAME --file_name pathabundance
+humann_join_tables -i pathcoverage_file -o OUTPUT_FILE_NAME --file_name pathcoverage
+
+conda deactivate
+
+#---------------------------------------------------------------------
+# Normalisation of the data 
+
+conda activate biobakery3
+
+humann_renorm_table --input joint_pathabundance.tsv --unit cpm --output pathabundance_norm.tsv
+
+# Data stratification
+
+conda activate biobakery3
+humann_split_stratified_table --input pathabundance_norm.tsv --output /scratch/users/HPC_ID
+
+# OUTPUT: pathabundance_norm_stratified.tsv  and pathabundance_norm_unstratified.tsv
+
+
+# Create barplot
+
+# Download pathabundance_norm_stratified.tsv
+
+rsync --rsh='ssh -p 8022' -avp HPC_ID@access-iris.uni.lu:HPC_WORKING_DIRECTORY/FILE_NAME COMPUTER_DIRECTORY
+
+# Add Metadata manually on R or Excel
+
+#Reload File on the HPC
+
+rsync --rsh='ssh -p 8022' COMPUTER_DIRECTORY/FILE_NAME -avp HPC_ID@access-iris.uni.lu:HPC_WORKING_DIRECTORY
+
+# plot the data
+
+conda activate biobakery3
+
+humann_barplot --input pathabundance_norm_stratified_meta.tsv --focal-metadata PHENOTYPE --last-metadata PHENOTYPE --sort sum metadata --scaling logstack --focal-feature PATHWAY --output NAME.pdf
