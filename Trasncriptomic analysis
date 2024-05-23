@@ -1,0 +1,1012 @@
+
+#######################################
+#Differential gene expression analysis# 
+#######################################
+
+
+## For the analysis the following libraries are needed:
+
+library(gplots)
+library(outliers)
+library(magrittr)
+library(tidyverse)
+library(ggplot2)
+library(dplyr)
+library(vioplot)
+library(openxlsx)
+library(Matrix)
+library(cluster)    
+library(factoextra) 
+library(dendextend) 
+library(limma)
+
+### Set working directory 
+setwd("/Users/emelinepa/Documents/University/4th_semester/cecum 2024") # for all the data of 2024, also saved all the data there
+#setwd("C:/Users/emeli/Documents/University/4th_semester/cecum 2021/") # for all the data of 2021
+#setwd("C:/Users/emeli/Documents/University/4th_semester/batch corrected cecum 2024/") # for all the data obtained after batch correction
+
+### Downloading of the data 
+data = read.csv("cecal_RNA_jan172024_mRNA_Counts_TPM.csv", row.names = 1, header = T, na.strings = "")
+
+### Remove the gene that have 0 in all samples  
+df_no_zero <- data[rowSums(data) > 1, ]
+
+### Do the log2 of the data 
+df_no_zero=df_no_zero+1
+df_no_zero=log(df_no_zero,2)
+
+#write.csv(df_no_zero,"cecal_RNA_jan172024_mRNA_Counts_TPMlog2.csv") #save the data 
+
+### Create vector with information on diet or phenotype of interest (if not already in diet or present in another file with all the phenotype for all the samples)
+diet <- c("CD", "HF", "CD", "HF", "HF", "CD", "CD", "HF", "HF", "CD", "CD", "CD", "HF", "CD", "HF", "CD", "HF", "CD", "CD", "HF")
+
+### Create row with information on age (can also be done for weight and other phenotype)
+age <- c(744,570,182,557,726,180,188,597,187,187,187,201,710,193,524,757,182,225,190,558)
+
+### Add the vector to dataset as new row
+data_diet <- rbind(diet, df_no_zero)
+data_final <- rbind(age, data_diet)
+
+### Separate the samples based on diet 
+CD_diet <- data_final[, data_final[2,] == "CD", drop = FALSE]
+HF_diet <- data_final[, data_final[2,] == "HF", drop = FALSE]
+
+### Separate the dataset of CD by young and old 
+young_CD_diet <- CD_diet[,CD_diet[1,]<=421]
+young_CD_diet <- as.data.frame(t(young_CD_diet))
+young_CD_diet <- young_CD_diet %>%
+  add_column(Category = "Young", .before = 1)
+
+young_CD_diet <- as.data.frame(t(young_CD_diet))
+# Total of 9 young mice 
+
+old_CD_diet <- CD_diet[,CD_diet[1,]>421]
+old_CD_diet <- as.data.frame(t(old_CD_diet))
+old_CD_diet <- old_CD_diet %>%
+  add_column(Category = "Old", .before = 1)
+
+old_CD_diet <- as.data.frame(t(old_CD_diet))
+# Total of 2 old mice 
+
+### Separate the dataset of HF by young and old 
+young_HF_diet <- HF_diet[,HF_diet[1,]<=421]
+young_HF_diet <- as.data.frame(t(young_HF_diet))
+young_HF_diet <- young_HF_diet %>%
+  add_column(Category = "Young", .before = 1)
+
+young_HF_diet <- as.data.frame(t(young_HF_diet))
+# Total of 2 young mice 
+
+old_HF_diet <- HF_diet[,HF_diet[1,]>421]
+old_HF_diet <- as.data.frame(t(old_HF_diet))
+old_HF_diet <- old_HF_diet %>%
+  add_column(Category = "Old", .before = 1)
+
+old_HF_diet <- as.data.frame(t(old_HF_diet))
+# Total of 7 old mice 
+
+### T-test, remove everything above 0.05
+
+order_data <- cbind(CD_diet, HF_diet) # bind each diet data together 
+order_data <- order_data[-c(1:2),] # remove rows that have the phenotype 
+order_data <- order_data %>%
+  mutate(across(everything(), as.numeric)) # make sure everything is numeric 
+
+## Calculate the p-value in a loop 
+
+p_value <- NULL # create an empty vector 
+
+for (i in 1:nrow(order_data)) {
+  result <- t.test(order_data[i,1:11], order_data[i,12:20])
+  p_value <- c(p_value, result$p.value)
+}
+
+order_data <- order_data %>%
+  mutate(p_value = p_value) # add the vector with the p-values to the table 
+
+order_data$adjusted_p_value <- p.adjust(order_data$p_value, method = "BH")
+
+# Filter to only keep the significant genes 
+#filtered_order_data <- order_data %>%
+#  filter(`p_values` <= 0.05) # left with 8112 significant genes 
+
+### -10log(0)
+
+p_value_only <- as.data.frame(order_data[, 22]) # extract only the p-values
+log_10_p <- NULL # create an empty vector 
+
+## Calculate the -log10(p) in a loop 
+
+for (i in 1:nrow(p_value_only)) {
+  log_10_p <- c(log_10_p, -log10(p_value_only[i, 1]))
+}
+
+order_data <- order_data %>%
+  mutate(log_10_p = log_10_p) # add the vector with the -log10(p) to the table
+
+### Fold change
+
+## Calculate the mean
+
+# CD diet 
+
+mean_CD <- order_data[,1:11] # remove the 3 first row
+mean_CD <- mean_CD %>%
+  mutate(across(everything(), as.numeric)) # make sure that everything is numeric
+mean_CD <- mean_CD %>%
+  mutate(Mean_CD = rowMeans(., na.rm = TRUE)) # calculate the mean for each gene 
+
+# HF diet
+
+mean_HF <- order_data[,12:20] # remove the 3 first row
+mean_HF <- mean_HF %>%
+  mutate(across(everything(), as.numeric)) # make sure that everything is numeric
+mean_HF <- mean_HF %>%
+  mutate(Mean_HF = rowMeans(., na.rm = TRUE)) # calculate the mean for each gene 
+
+# Create a new table with just the mean 
+
+mean_CD <- mean_CD[, "Mean_CD", drop = FALSE] # table with just CD mean 
+mean_HF <- mean_HF[, "Mean_HF", drop = FALSE] # table with just HF mean
+mean_all <- cbind(mean_CD, mean_HF) # bind both mean together 
+
+## Calculate the fold change 
+
+mean_all <- mean_all %>%
+  mutate(across(everything(), as.numeric)) # make sure everything is numeric 
+
+fold_change <- NULL # create an empty vector 
+
+for (i in 1:nrow(mean_all)) {
+  fold_change <- c(fold_change, mean_all[i, 1]-mean_all[i, 2])
+}
+
+order_data <- order_data %>%
+  mutate(log2FC = fold_change) # add the vector with the fold change to the table
+
+
+### Volcano plot 
+
+volcano_CD_vs_HF <- order_data %>%
+  rownames_to_column(var = "Genes")
+
+volcano_label <- volcano_CD_vs_HF[,c(1,23:25)] # table with just the genes name, -log10(p) and the fold change
+top_genes <- head(volcano_CD_vs_HF[order(-volcano_CD_vs_HF$log_10_p), ], 10)
+
+
+p_1 <- ggplot(volcano_CD_vs_HF, aes(x = log2FC, y = log_10_p, color = log2FC > 0)) +
+  xlim(-2,2) +
+  geom_point(size = 2) +
+  geom_hline(yintercept = 0.5, linetype = "dashed", color = "red") +
+  geom_vline(xintercept = c(-0.30, 0.30), linetype = "dashed", color = "red") +
+  geom_text(data = top_genes, aes(label = Genes), vjust = -0.5, hjust = 0, color = "black", size = 3) +
+  labs(title = "Differentially expressed genes in cecum between CD and HF diet",
+       x = "Log2 Fold Change",
+       y = "-log10(p)") +
+  theme_minimal() +
+  scale_color_manual(values = c("blue", "red"),
+                     labels = c("HF", "CD")) +
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+
+#make list with most diffentially expressed genes
+Topgenes<- ordered[order(ordered$p_value),] 
+Topgenes <- Topgenes[Topgenes$p_value < 0.05,] #all significant genes
+UpgenesQuadriceps<- Topgenes[Topgenes$log2FC > 1.5,] # significantly uperculated genes
+DowngenesQuadriceps <- Topgenes[Topgenes$log2FC < -1.5,] #significantly downregulated genes
+
+final_list <- rbind(UpgenesQuadriceps, DowngenesQuadriceps)
+write.csv(final_list, "/Users/emelinepa/Documents/University/4th_semester/cecum 2024/genes_of_interest.csv")
+
+#ggsave("volcano_CD_vs_HF_with_adj_p_value.pdf", plot = p_1, width = 8, height = 6, dpi = 300) # save the graph as a pdf 
+
+### Order the volcano_CD_label
+
+ordered <- volcano_label %>%
+  arrange(desc(abs(log2FC)), desc(log_10_p)) # order the genes based on there p-values and fold change 
+
+#write.csv(ordered,"correctec_cecal_RNA_jan172024.csv")
+
+### Format data set for GSEA analysis 
+
+## Get the gct file 
+
+data_frame <- volcano_CD_vs_HF[, -c(22:25)]
+header_row <- as.matrix(t(colnames(data_frame)))
+data_matrix <- as.matrix(data_frame)
+final_matrix <- rbind(header_row, data_matrix)
+num_rows_volcano <- nrow(final_matrix)
+num_cols_volcano <- ncol(final_matrix)
+cecum_CD_vs_HF <- "cecum_CD_vs_HF.gct"
+output_file <- file.path("/Users/emelinepa/Documents/University/4th_semester/GSEA data", cecum_CD_vs_HF)
+gct_header <- paste(num_rows_volcano, num_cols_volcano, sep = "\t")
+char_matrix <- as.matrix(final_matrix)
+gct_content <- c("##1.2", gct_header, apply(char_matrix, 1, paste, collapse = "\t"))
+writeLines(gct_content, output_file)
+cat("Number of rows:", num_rows_volcano, "\n")
+cat("Number of columns:", num_cols_volcano, "\n")
+
+## Create the file with the condition, cls 
+
+m <- cbind(CD_diet, HF_diet) 
+CD_category <- m[2,]
+cls_content <- c(
+  "This is a CLS file",
+  paste(ncol(m), length(unique(CD_category)), "2", sep = "\t"),  # Metadata line
+  paste("CD HF", paste(CD_category, collapse = " "), sep = "\t")  # Data line
+)
+cecum_diet_category <- "cecum_diet_category.cls"
+writeLines(cls_content, cecum_diet_category)
+cat("Data exported to CLS file:", cecum_diet_category, "\n")
+
+### Compare my top hits to previous top hits 
+
+## Download data with p-values (pevious)
+
+data_top_hits = read.csv("/Users/emelinepa/Documents/University/4th_semester/cecum 2021/RatioandTtest.csv", row.names = 1, header = T, na.strings = "")
+
+## Order the data 
+
+data_top_hits <- data_top_hits %>%
+  mutate(across(everything(), as.numeric))
+
+top_hits_order <- data_top_hits %>%
+  arrange(desc(abs(foldChange)), desc(ttestvalue_log10p))
+
+#write.csv(top_hits_order, "/Users/emelinepa/Documents/University/4th_semester/cecum 2021/ordered_ratioandttest.csv")
+
+### Merge the 2 data set by genes (not the ordered one)
+
+data_top_hits <- data_top_hits %>%
+  rownames_to_column(var = "Genes")
+
+merged <- merge(volcano_label, data_top_hits, by.x = "Genes", by.y = "Genes", all.x = TRUE, sort = FALSE)
+
+#write.csv(merged, "merged_pvalue_cecum_fold2.csv")
+
+### Hierarchical cluster, merge the 2 dataset together 
+
+full_data <- read.csv("/Users/emelinepa/Documents/University/4th_semester/cecum 2021/20210815_corrected_ComBat_cecum_data_Good75_ReducedList.csv", row.names = 1, header = T, na.strings = "")
+full_data <- full_data[-c(1:8), -1]
+row.names(full_data) <- NULL
+rownames(full_data) <- full_data[, 1]
+full_data <- full_data[,-1]
+
+full_data <- full_data%>%
+  rownames_to_column(var = "Genes")
+df_no_zero_genes <- df_no_zero %>% 
+  rownames_to_column(var = "Genes")
+
+full_merged <- merge(df_no_zero_genes, full_data, by.x = "Genes", by.y = "Genes", all.x = TRUE, sort = FALSE)
+rownames(full_merged) <- full_merged[, 1]
+full_merged <- full_merged[, -1]
+
+#write.csv(full_merged, "cecum_data_2021_2024.csv")
+
+### Hierarchical cluster 
+
+no_NA <- na.omit(full_merged)
+no_NA_t <- t(no_NA)
+d <- dist(no_NA_t)
+fit <- hclust(d, method="ward.D2")
+plot(fit)
+
+pdf("Hierarchical cluster.pdf", width=25, height=8)
+plot(fit)
+dev.off()
+
+### create t-SNE plot  
+
+library(Rtsne)
+
+full_data_tsne <- read.csv("/Users/emelinepa/Documents/University/4th_semester/cecum 2021/cecum 2021/20210815_corrected_ComBat_cecum_data_Good75_ReducedList.csv", row.names = 1, header = T, na.strings = "")
+full_data_tsne <- full_data_tsne[1, -c(1:2)]
+no_NA_t_matrix <- as.data.frame(no_NA_t)
+no_NA_t_matrix <- no_NA_t_matrix %>%
+  mutate(across(everything(), as.numeric))
+no_NA_t_matrix <- as.matrix(no_NA_t_matrix)
+batch_test <- c(1,2,1,2,2,1,1,2,2,1,1,1,2,1,2,1,2,1,1,2,2,1,2,1,2,2,1,2,1,1,1,2,2,1,2,1,1,1,2,2,1,1,1,2,2,1,2,2,2,2,2,2,2,2,2,1,1,1,1,2,2,1,2,1,1,2,2,1,1,1,2,2,1,2,2,2,1,1,1,1,1,2,1,1,2,2,1,2,2,1,1,2,1,2,2)
+vec_replaced <- ifelse(batch_test == 1, "CD", ifelse(batch_test == 2, "HF", batch_test))
+Labels_batch <- vec_replaced 
+tsne_out <- Rtsne(no_NA_t_matrix, dims=2, perpelexity = 5, verbose=TRUE)
+df = data.frame (Y1=tsne_out$Y[,1],Y2=tsne_out$Y[,2], labels = Labels_batch)
+require(ggplot2)
+p_2 <-ggplot(df,aes(Y1,Y2,colour=Labels)) + geom_point()
+
+#ggsave("t_sne.pdf", plot = p_2, width = 8, height = 6, dpi = 300) # save the graph as a pdf 
+
+### Batch effect: Combat 
+
+library(devtools)
+library(Biobase)
+library(sva)
+library(bladderbatch)
+library(snpStats)
+library(AnnotationDbi)
+
+gene_names <- rownames(no_NA)
+batch_no_NA <- read.csv("cecum_data_2021_2024.csv", header = T, row.names = 1, stringsAsFactors=FALSE)
+batch_no_NA <- na.omit(batch_no_NA)
+batch<- c(1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2)
+
+batch_no_NA_matrix_test <- batch_no_NA[c(1:20),]
+
+combat_edata1 <- ComBat(dat=batch_no_NA, batch=batch_test, mod=NULL, par.prior=FALSE, mean.only=TRUE) # combatch where remove the batch effect on the diet 
+
+combat_edata1_samples<- ComBat(dat=batch_no_NA, batch=batch, mod=NULL, par.prior=FALSE, mean.only=TRUE) # combatch where remove the batch effect of the 2 dataset 
+
+combat_edata1_no_NA <- na.omit(combat_edata1)
+
+#write.csv(combat_edata1_no_NA, "C:/Users/emeli/Documents/University/4th_semester/batch corrected cecum 2024/batch_corrected_diet_2021_2024_cecum_RNA_TPM_fold2.csv") 
+#write.csv(combat_edata1_samples, "C:/Users/emeli/Documents/University/4th_semester/batch corrected cecum 2024/batch_corrected_2021_2024_cecum_RNA_TPM_fold2.csv")
+
+### create t-SNE plot  
+
+library(Rtsne)
+
+combat_edata1_samples_t <- t(combat_edata1_samples)
+combat_edata1_samples_t <- as.data.frame(combat_edata1_samples_t)
+combat_edata1_samples_t <- combat_edata1_samples_t %>%
+  mutate(across(everything(), as.numeric))
+combat_edata1_samples_t <- as.matrix(combat_edata1_samples_t)
+vec_replaced <- ifelse(batch_test == 1, "CD", ifelse(batch_test == 2, "HF", batch_test))
+Labels_batch <- vec_replaced 
+tsne_out_samples <- Rtsne(combat_edata1_samples_t, dims=2, perpelexity = 25, verbose=TRUE)
+df_combat_sample = data.frame (Y1=tsne_out_samples$Y[,1],Y2=tsne_out_samples$Y[,2], labels = Labels_batch)
+require(ggplot2)
+p_3 <- ggplot(df_combat_sample,aes(Y1,Y2,colour=Labels)) + geom_point()
+
+#ggsave("C:/Users/emeli/Documents/University/4th_semester/batch corrected cecum 2024/t_sne_sample_batch.pdf", plot = p_3, width = 8, height = 6, dpi = 300) # save the graph as a pdf 
+
+combat_edata1_no_NA <- na.omit(combat_edata1)
+combat_edata1_t <- t(combat_edata1_no_NA)
+combat_edata1_t <- as.data.frame(combat_edata1_t)
+combat_edata1_t <- combat_edata1_t %>%
+  mutate(across(everything(), as.numeric))
+combat_edata1_t <- as.matrix(combat_edata1_t)
+vec_replaced <- ifelse(batch_test == 1, "CD", ifelse(batch_test == 2, "HF", batch_test))
+Labels_batch <- vec_replaced 
+tsne_out_batch <- Rtsne(combat_edata1_t, dims=2, perpelexity = 25, verbose=TRUE)
+df_combat = data.frame (Y1=tsne_out_batch$Y[,1],Y2=tsne_out_batch$Y[,2], labels = Labels_batch)
+require(ggplot2)
+p_4 <- ggplot(df_combat,aes(Y1,Y2,colour=Labels)) + geom_point()
+
+#ggsave("C:/Users/emeli/Documents/University/4th_semester/batch corrected cecum 2024/t_sne_diet_batch.pdf", plot = p_4, width = 8, height = 6, dpi = 300) # save the graph as a pdf 
+
+### Hierarchical cluster 
+
+d_sample <- dist(combat_edata1_samples_t)
+fit_samples <- hclust(d_sample, method="ward.D2")
+plot(fit_samples)
+#pdf("C:/Users/emeli/Documents/University/4th_semester/batch corrected cecum 2024/Hierarchical_cluster_samples.pdf", width=25, height=8)
+#plot(fit_samples)
+#dev.off()
+  
+d_combatch <- dist(combat_edata1_t)
+fit <- hclust(d_combatch, method="ward.D2")
+plot(fit)
+#pdf("C:/Users/emeli/Documents/University/4th_semester/batch corrected cecum 2024/Hierarchical_cluster_diet.pdf", width=25, height=8)
+#plot(fit)
+#dev.off()
+
+### Separate the samples based on diet 
+#setwd("C:/Users/emeli/Documents/University/4th_semester/batch corrected cecum 2024")
+combat_edata1_samples <- read.csv("/Users/emelinepa/Documents/University/4th_semester/batch corrected cecum 2024/batch_corrected_2021_2024_cecum_RNA_TPM_fold2.csv", row.names = 1, header = T, na.strings = "")
+
+combat_diet <- rbind(vec_replaced, combat_edata1_samples)
+combat_diet <- as.data.frame(combat_diet)
+rownames(combat_diet)[1] <- "vec_replaced"
+CD_diet_combat <- combat_diet[, combat_diet["vec_replaced",] == "CD", drop = FALSE]
+HF_diet_combat <- combat_diet[, combat_diet["vec_replaced",] == "HF", drop = FALSE]
+
+### T-test, remove everything above 0.05
+
+order_data_combat <- cbind(CD_diet_combat, HF_diet_combat) # bind each diet data together 
+order_data_combat <- order_data_combat[-1,] # remove the 4 first line 
+order_data_combat <- order_data_combat%>%
+  mutate(across(everything(), as.numeric)) # make sure everything is numeric 
+
+### Calculate the p-value in a loop 
+
+p_value_combat <- NULL # create an empty vector 
+
+for (i in 1:nrow(order_data_combat)) {
+  result <- t.test(order_data_combat[i,1:47], order_data_combat[i,48:95])
+  p_value_combat <- c(p_value_combat, result$p.value)
+}
+
+order_data_combat <- order_data_combat %>%
+  mutate(p_values = p_value_combat) # add the vector with the p-values to the table 
+
+order_data_combat$adjusted_p_value <- p.adjust(order_data_combat$p_values, method = "BH")
+
+### Filter to only keep the significant genes 
+
+filtered_order_data_combat <- order_data_combat %>%
+ filter(`p_values` <= 0.05) 
+
+### -10log(0)
+
+p_value_only_combat <- as.data.frame(filtered_order_data_combat[, 97]) # extract only the p-values
+log_10_p_combat <- NULL # create an empty vector 
+
+for (i in 1:nrow(p_value_only_combat)) {
+  log_10_p_combat <- c(log_10_p_combat, -log10(p_value_only_combat[i, 1]))
+}
+
+filtered_order_data_combat <- filtered_order_data_combat %>%
+  mutate(log_10_p = log_10_p_combat) # add the vector with the -log10(p) to the table
+
+### Fold change
+
+## Calculate the mean
+
+# CD diet 
+
+mean_CD_combat <- filtered_order_data_combat[,1:47] 
+mean_CD_combat <- mean_CD_combat %>%
+  mutate(across(everything(), as.numeric)) # make sure that everything is numeric
+mean_CD_combat <- mean_CD_combat%>%
+  mutate(mean_CD_combat = rowMeans(., na.rm = TRUE)) # calculate the mean for each gene 
+
+# HF diet
+
+mean_HF_combat <- filtered_order_data_combat[,48:95] 
+mean_HF_combat <- mean_HF_combat %>%
+  mutate(across(everything(), as.numeric)) # make sure that everything is numeric
+mean_HF_combat <- mean_HF_combat %>%
+  mutate(mean_HF_combat = rowMeans(., na.rm = TRUE)) # calculate the mean for each gene 
+
+## Create a new table with just the mean 
+
+mean_CD_combat <- mean_CD_combat[, "mean_CD_combat", drop = FALSE] # table with just CD mean 
+mean_HF_combat <- mean_HF_combat[, "mean_HF_combat", drop = FALSE] # table with just HF mean
+
+mean_all_combat <- cbind(mean_CD_combat, mean_HF_combat) # bind both mean together 
+
+## Calculate the fold change 
+
+mean_all_combat <- mean_all_combat %>%
+  mutate(across(everything(), as.numeric)) # make sure everything is numeric 
+
+fold_change_combat <- NULL # create an empty vector 
+
+for (i in 1:nrow(mean_all_combat)) {
+  fold_change_combat <- c(fold_change_combat, mean_all_combat[i, 1]-mean_all_combat[i, 2])
+}
+
+filtered_order_data_combat <- filtered_order_data_combat %>%
+  mutate(log2FC = fold_change_combat) # add the vector with the fold change to the table
+
+### Volcano plot 
+
+volcano_CD_vs_HF_COMBAT <- filtered_order_data_combat %>%
+  rownames_to_column(var = "Genes")
+
+volcano_label_combat <- volcano_CD_vs_HF_COMBAT[,c(1,98:100)] # table with just the genes name, -log10(p) and the fold change 
+
+top_genes_combat <- head(volcano_CD_vs_HF_COMBAT[order(-volcano_CD_vs_HF_COMBAT$log_10_p), ], 10)
+
+p_5 <- ggplot(volcano_CD_vs_HF_COMBAT, aes(x = log2FC, y = log_10_p, color = log2FC > 0)) +
+  xlim(-2,2) +
+  geom_point(size = 2) +
+  geom_hline(yintercept = 2.3, linetype = "dashed", color = "red") +
+  geom_vline(xintercept = c(-0.30, 0.30), linetype = "dashed", color = "red") +
+  geom_text(data = top_genes_combat, aes(label = Genes), vjust = -0.5, hjust = 0, color = "black", size = 3) +
+  labs(title = "Differentially expressed genes in cecum between CD and HF diet",
+       x = "Log2 Fold Change",
+       y = "-log10(p)") +
+  theme_minimal() +
+  scale_color_manual(values = c("blue", "red"),
+                     labels = c("HF", "CD")) +
+  theme(plot.title = element_text(hjust = 0.5))
+
+#ggsave("volcano_batch_samples_with_adj_p_value.pdf", plot = p_5, width = 8, height = 6, dpi = 300) # save the graph as a pdf 
+
+### Format data set for GSEA analysis 
+
+## Get the gct file 
+
+data_frame <- volcano_CD_vs_HF_COMBAT[, -c(97:99)]
+header_row <- as.matrix(t(colnames(data_frame)))
+data_matrix <- as.matrix(data_frame)
+final_matrix <- rbind(header_row, data_matrix)
+num_rows_volcano <- nrow(final_matrix)
+num_cols_volcano <- ncol(final_matrix)
+cecum_CD_vs_HF_combat <- "cecum_CD_vs_HF_combat.gct"
+output_file <- file.path("/Users/emelinepa/Documents/University/4th_semester/GSEA data", cecum_CD_vs_HF_combat)
+gct_header <- paste(num_rows_volcano, num_cols_volcano, sep = "\t")
+char_matrix <- as.matrix(final_matrix)
+gct_content <- c("##1.2", gct_header, apply(char_matrix, 1, paste, collapse = "\t"))
+writeLines(gct_content, output_file)
+cat("Number of rows:", num_rows_volcano, "\n")
+cat("Number of columns:", num_cols_volcano, "\n")
+
+## Create the file with the condition, cls 
+
+m <- cbind(CD_diet_combat, HF_diet_combat) 
+CD_category <- m[1,]
+cls_content <- c(
+  "This is a CLS file",
+  paste(ncol(m), length(unique(CD_category)), "2", sep = "\t"),  # Metadata line
+  paste("CD HF", paste(CD_category, collapse = " "), sep = "\t")  # Data line
+)
+cecum_diet_category <- "cecum_diet_category_combat.cls"
+writeLines(cls_content, cecum_diet_category)
+cat("Data exported to CLS file:", cecum_diet_category, "\n")
+
+### volcano plot with top hit gene with GSEA analysis 
+
+## REACTOME_CARGO_RECOGNITION_FOR_CLATHRIN_MEDIATED_ENDOCYTOSIS
+
+endocytosis <- c("Slc2a8",	
+                     "Ubc",	
+                     "Ubb",	
+                     "Cops6",	
+                     "Cops5",	
+                     "M6pr",	
+                     "Ap2m1",	
+                     "Vamp3",	
+                     "Cops2",	
+                     "Cltc",	
+                     "Picalm",
+                     "Agfg1",	
+                     "Ubqln2",
+                     "Cops7b",
+                     "Epn2",	
+                     "Ldlr",	
+                     "Tor1b",	
+                     "Egfr",	
+                     "Tfrc",	
+                     "Vamp2",	
+                     "Itsn1",	
+                     "Eps15l1",	
+                     "Hbegf",	
+                     "Eps15",	
+                     "Stam",	
+                     "Cd3d",	
+                     "Vamp4",	
+                     "Cd3g",	
+                     "Apob",	
+                     "Reps2",	
+                     "Areg",	
+                     "Fcho2",	
+                     "Dvl2",	
+                     "Sh3kbp1",	
+                     "Agtr1",	
+                     "Itsn2",	
+                     "Chrm2",	
+                     "Wnt5a",	
+                     "Dab2",	
+                     "Arrb2",	
+                     "Slc18a3",	
+                     "Sh3gl3", 
+                     "Fzd4",	
+                     "Il7r",	
+                     "Syt9",	
+                     "Syt1",	
+                     "Sgip1",	
+                     "Snap91",	
+                     "Adrb2",	
+                     "Tacr1",	
+                     "Syt2",	
+                     "Grk3",	
+                     "Syt11",	
+                     "Syt8",	
+                     "Ereg",	
+                     "Btc"
+)
+
+endocytosis <- as.data.frame(endocytosis)
+names(endocytosis)[names(endocytosis) == "endocytosis"] <- "Genes"
+
+volcano_endocytosis <- volcano_CD_vs_HF_COMBAT %>%
+  filter(Genes %in% endocytosis)
+
+ggplot(volcano_CD_vs_HF_COMBAT, aes(x = log2FC, y = log_10_p, color = log2FC > 0)) +
+  xlim(-2,2) +
+  geom_point(size = 2) +
+  geom_hline(yintercept = 2.3, linetype = "dashed", color = "red") +
+  geom_vline(xintercept = c(-0.30, 0.30), linetype = "dashed", color = "red") +
+  geom_text(data = volcano_endocytosis, aes(label = Genes), vjust = -0.5, hjust = 0, color = "black", size = 3) +
+  labs(title = "Differentially expressed genes in cecum between CD and HF diet",
+       x = "Log2 Fold Change",
+       y = "-log10(p)") +
+  theme_minimal() +
+  scale_color_manual(values = c("blue", "red"),
+                     labels = c("HF", "CD")) +
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+RESPIRATORY_ELECTRON <- c("Nubpl",
+                          "Etfb",
+                          "Ndufv3",
+                          "Cox6a1",
+                          "Ndufb8",
+                          "Sdhb",
+                          "Cox5b",
+                          "Surf1",
+                          "Ndufa8",
+                          "Cox4i1",
+                          "Ndufs6",
+                          "Ndufb10",
+                          "Cox6b1",
+                          "Cox7b",
+                          "Ndufb3",
+                          "Etfa",
+                          "Cox7c",
+                          "Ndufab1",
+                          "Ndufs1",
+                          "Etfdh",
+                          "Ndufaf5",
+                          "Ndufa4",
+                          "Coq10b",
+                          "Lrpprc",
+                          "Tmem126b",
+                          "Coq10a",
+                          "Tmem186",
+                          "Ndufaf4"
+)
+
+volcano_endocytosis <- volcano_CD_vs_HF_COMBAT %>%
+  filter(Genes %in% RESPIRATORY_ELECTRON)
+
+RESPIRATORY_ELECTRON_genes <- volcano_endocytosis[,c(1,97:99)]
+
+write_csv(RESPIRATORY_ELECTRON_genes, "RESPIRATORY_ELECTRON_genes.csv")
+
+
+# WAGCNA 
+
+# Set up environment
+
+#clear workspace and set string as factors to false
+#rm(list=ls())
+options(stringsAsFactors = F)
+
+
+# Install required packages
+
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+#uncomment if not yet installed!
+#BiocManager::install(c("WGCNA","rstudioapi","dplyr"))
+
+library(WGCNA)
+library(rstudioapi)
+library(dplyr)
+library(plotrix)
+
+
+# read data and combine them to input file for WGCNA
+combat_diet_genes <- volcano_CD_vs_HF_COMBAT[, -c(97:99)]
+Genes <- combat_diet_genes[c(1)]
+
+NewData <- combat_diet[, which(colMeans(!is.na(combat_diet)) > 0.5)]
+WData <- as.data.frame (t(NewData))
+
+Samples<-WData[ c(1)]
+Samples[Samples=="CD"]<-0
+Samples[Samples=="HF"]<-1
+
+
+data.log <- as.data.frame(as.matrix(WData))
+
+
+# Form a data frame analogous to expression data that will hold the clinical traits.
+
+traitData = Samples
+data.filtered.dcm = data.log[,-1]
+datTraits = traitData
+datTraits <- mutate_all(datTraits, function(x) as.numeric(as.character(x)))
+
+
+#merge together the filtered table with the information from the Giannakis dataset
+
+# Cluster samples
+Data1 <- dist(data.filtered.dcm)
+
+sampleTree = hclust(dist(data.filtered.dcm), method = "average")
+
+# Convert traits to a color representation: white means low, red means high, grey means missing entry
+traitColors = numbers2colors(datTraits, signed = FALSE);
+sizeGrWindow(12,12)
+
+# Plot the sample dendrogram and the colors underneath.
+pdf("sample_dendrogram_heatmap.pdf", width = 10, height = 8)
+plotDendroAndColors(sampleTree, traitColors,
+                    groupLabels = names(datTraits), cex.dendroLabels = 0.5, 
+                    main = "Sample dendrogram and trait heatmap")
+dev.off()
+
+
+save(data.filtered.dcm, datTraits, file = "WGCNA-input.RData")
+
+
+###########################################
+#Network construction and module detection#
+###########################################
+
+
+#enableWGCNAThreads()
+# Load the data 
+lnames = load(file = "WGCNA-input.RData");
+#The variable lnames contains the names of loaded variables.
+lnames
+
+
+# Choose a set of soft-thresholding powers
+powers = seq(1,15, by=2)
+
+# Call the network topology analysis function
+sft = pickSoftThreshold(data.filtered.dcm, powerVector = powers, verbose = 5)
+
+#save(sft, file = "WGCNA-sft.RData")
+
+# Plot the results:
+sizeGrWindow(9, 5)
+par(mfrow = c(1,2));
+cex1 = 0.9;
+
+# Scale-free topology fit index as a function of the soft-thresholding power
+plot(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2], xlab="Soft Threshold (power)",ylab="Scale Free Topology Model Fit,signed R^2",type="n", main = paste("Scale independence"));
+
+text(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2], labels=powers,cex=cex1,col="red");
+
+# this line corresponds to using an R^2 cut-off of h
+abline(h=0.80,col="red")
+
+# Mean connectivity as a function of the soft-thresholding power
+plot(sft$fitIndices[,1], sft$fitIndices[,5], xlab="Soft Threshold (power)",ylab="Mean Connectivity", type="n", main = paste("Mean connectivity"))
+
+text(sft$fitIndices[,1], sft$fitIndices[,5], labels=powers, cex=cex1,col="red")
+
+
+
+# looking at both - soft threshold and mean connectivity 
+# I decided to go with power 5 
+data.filtered.dcm <- data.filtered.dcm %>%
+  mutate(across(everything(), as.numeric))
+net = blockwiseModules(data.filtered.dcm, power = 5,
+                       TOMType = "unsigned", minModuleSize = 30,
+                       reassignThreshold = 0, mergeCutHeight = 0.25,
+                       numericLabels = TRUE, pamRespectsDendro = FALSE,
+                       saveTOMs = TRUE,
+                       saveTOMFileBase = "expTOM", 
+                       verbose = 3)
+ 
+#save(net, file = "WGCNA-net.RData")
+
+
+
+# open a graphics window
+sizeGrWindow(15, 9)
+# Convert labels to colors for plotting
+mergedColors = labels2colors(net$colors)
+# Plot the dendrogram and the module colors underneath
+pdf("dendrogram_module.pdf", width = 10, height = 8)
+plotDendroAndColors(net$dendrograms[[1]], mergedColors[net$blockGenes[[1]]],
+                    "Module colors",
+                    dendroLabels = FALSE, hang = 0.03,
+                    addGuide = TRUE, guideHang = 0.05)
+dev.off()
+
+moduleLabels = net$colors
+moduleColors = labels2colors(net$colors)
+table(moduleColors)
+MEs = net$MEs;
+geneTree = net$dendrograms[[1]];
+save(MEs, moduleLabels, moduleColors, geneTree, file = "network-reconstruction.RData")
+
+
+
+
+############################################
+#Relate modules to external clinical traits#
+###########################################
+
+
+# Load the expression and trait data saved in the first part
+lnames = load(file = "WGCNA-input.RData");
+#The variable lnames contains the names of loaded variables.
+lnames
+# Load network data saved in the second part.
+lnames = load(file = "network-reconstruction.RData");
+lnames
+
+
+# Define numbers of genes and samples
+nGenes = ncol(data.filtered.dcm);
+nSamples = nrow(data.filtered.dcm);
+# Recalculate MEs with color labels
+data.filtered.dcm <- data.filtered.dcm %>%
+  mutate(across(everything(), as.numeric))
+MEs0 = moduleEigengenes(data.filtered.dcm, moduleColors)$eigengenes
+MEs = orderMEs(MEs0)
+moduleTraitCor = cor(MEs, datTraits, use = "p");
+moduleTraitPvalue = corPvalueStudent(moduleTraitCor, nSamples);
+
+
+sizeGrWindow(20,20)
+# Will display correlations and their p-values
+textMatrix =  paste(signif(moduleTraitCor, 2), "\n(",
+                    signif(moduleTraitPvalue, 1), ")", sep ="");
+dim(textMatrix) = dim(moduleTraitCor)
+par(mar = c(8, 8.5, 3, 3));
+
+# Display the correlation values within a heatmap plot
+#pdf("correlation_heatmap.pdf", width = 10, height = 8)
+labeledHeatmap(Matrix = moduleTraitCor,
+               xLabels = names(datTraits),
+               yLabels = names(MEs),
+               ySymbols = names(MEs),
+               colorLabels = FALSE,
+               colors = blueWhiteRed(50),
+               textMatrix = textMatrix,
+               setStdMargins = FALSE,
+               cex.text = 0.3,
+               cex.lab.y = 0.5,
+               zlim = c(-1,1),
+               main = paste("Module-trait relationships"))
+#dev.off()
+
+# Define variable time containing the time column of datTrait
+Diet = as.data.frame(datTraits[,1]);
+names(Diet) = "diet"
+# names (colors) of the modules
+modNames = substring(names(MEs), 3)
+
+geneModuleMembership = as.data.frame(cor(data.filtered.dcm, MEs, use = "p"));
+MMPvalue = as.data.frame(corPvalueStudent(as.matrix(geneModuleMembership), nSamples));
+
+names(geneModuleMembership) = paste("MM", modNames, sep="");
+names(MMPvalue) = paste("p.MM", modNames, sep="");
+
+geneTraitSignificance = as.data.frame(cor(data.filtered.dcm, Diet, use = "p"));
+GSPvalue = as.data.frame(corPvalueStudent(as.matrix(geneTraitSignificance), nSamples));
+
+names(geneTraitSignificance) = paste("GS.", names(Diet), sep="");
+names(GSPvalue) = paste("p.GS.", names(Diet), sep="");
+
+
+
+#module = "red"
+#module = "black"
+#module = "green"
+module = "skyblue"
+#module = "turquoise"
+column = match(module, modNames);
+moduleGenes = moduleColors==module;
+
+sizeGrWindow(7, 7);
+par(mfrow = c(1,1));
+#pdf("module_membership.pdf", width = 10, height = 8)
+verboseScatterplot(abs(geneModuleMembership[moduleGenes, column]),
+                   abs(geneTraitSignificance[moduleGenes, 1]),
+                   xlab = paste("Module Membership in", module, "module"),
+                   ylab = "Gene significance for diet",
+                   main = paste("Module membership vs. gene significance\n"),
+                   cex.main = 1.2, cex.lab = 1.2, cex.axis = 1.2, col = module)
+#dev.off()
+
+# Create the starting data frame
+geneInfo0 = data.frame(Gene.ID = colnames(data.filtered.dcm),
+                       moduleColor = moduleColors,
+                       geneTraitSignificance,
+                       GSPvalue)
+
+# Order modules by their significance 
+modOrder = order(-abs(cor(MEs, Diet, use = "p")));
+
+# Add module membership information in the chosen order
+for (mod in 1:ncol(geneModuleMembership))
+{
+  oldNames = names(geneInfo0)
+  geneInfo0 = data.frame(geneInfo0, geneModuleMembership[, modOrder[mod]], 
+                         MMPvalue[, modOrder[mod]]);
+  names(geneInfo0) = c(oldNames, paste("MM.", modNames[modOrder[mod]], sep=""),
+                       paste("p.MM.", modNames[modOrder[mod]], sep=""))
+}
+# Order the genes in the geneInfo variable first by module color, then by geneTraitSignificance
+geneOrder = order(geneInfo0$moduleColor, -abs(geneInfo0$GS.diet));
+geneInfo = geneInfo0[geneOrder, ]
+
+
+write.csv(geneInfo, file = "geneInfo.csv", row.names = FALSE)
+
+
+########################
+#Network visualization# 
+########################
+
+
+# Recalculate topological overlap if needed
+TOM = TOMsimilarityFromExpr(data.filtered.dcm, power = 6);
+#save(TOM, file = "WGCNA-TOM.RData")
+
+# Select modules
+#modules = c("black");
+modules = c("skyblue");
+#modules = c("turquoise");
+# Select module probes
+probes = names(data.filtered.dcm)
+inModule = is.finite(match(moduleColors, modules));
+modProbes = probes[inModule];
+# Select the corresponding Topological Overlap
+modTOM = TOM[inModule, inModule];
+dimnames(modTOM) = list(modProbes, modProbes)
+# Export the network into edge and node list files Cytoscape can read
+cyt = exportNetworkToCytoscape(modTOM,
+                               edgeFile = paste("QuadricepsCytoscapeInput-edges-", paste(modules, collapse="-"), ".txt", sep=""),
+                               nodeFile = paste("QuadricepsCytoscapeInput-nodes-", paste(modules, collapse="-"), ".txt", sep=""),
+                               weighted = TRUE,
+                               threshold = 0.05,
+                               nodeNames = modProbes,
+                               nodeAttr = moduleColors[inModule])
+
+skyblue = as.data.frame(cyt$nodeData$nodeName)
+row.names(skyblue) = cyt$nodeData$nodeName
+#write.csv(skyblue,"Lskyblue.csv")
+
+
+BlueModule = MEs$
+  
+
+module_df <- data.frame(
+  gene_id = names(net$colors),
+  colors = labels2colors(net$colors))
+
+modules_of_interest1 = c("skyblue")
+submodgreen = module_df %>%
+  subset(colors %in% modules_of_interest1)
+
+row.names(module_df) = module_df$gene_id
+
+Genes_skyblue <- row.names(submodgreen) 
+
+
+
+require(gprofiler2)
+gostresGreen = gost(query = Genes_skyblue,
+                    organism = "mmusculus",
+                    numeric_ns = "ENTREZGENE_ACC")
+
+gostplot(gostresGreen, interactive = T)
+
+
+
+
+#####################################################################  
+# FIGURE TYPE: DOT PLOT COMPARING TWO GROUPS (Violon plot with dots)#
+##################################################################### 
+
+yCD=as.numeric(CD_diet_combat[2,])
+#yCD[is.na(yCD)] <- rep(1, length(yCD[is.na(yCD)]))
+yHF=as.numeric(HF_diet_combat[2,])
+#yHF[is.na(yHF)] <- rep(2, length(yHF[is.na(yHF)]))
+
+
+stripchart(yCD, at=0.7, pch =21, cex=1.2, bg="blue", method="jitter", xlim=c(0.6, 1.1), las=1, ylim=c(min(c(yCD,yHF), na.rm=T), max(c(yCD,yHF), na.rm=T)), vertical=T)
+stripchart(yHF, at=1.0, pch=21, cex=1.2, bg="red", method="jitter", add=T, vertical=T)
+  segments(0.65, quantile(yCD, na.rm=T)[2], 0.75, quantile(yCD, na.rm=T)[2], col="red", lwd=3)	# first quantile bar for first cohort
+  segments(0.6, median(yCD, na.rm=T), 0.8, median(yCD, na.rm=T), col="red", lwd=3)	# median bar for first cohort
+  segments(0.65, quantile(yCD, na.rm=T)[4], 0.75, quantile(yCD, na.rm=T)[4], col="red", lwd=3)	# first quantile bar for first cohort
+  segments(0.7,quantile(yCD, na.rm=T)[2],0.7,quantile(yCD, na.rm=T)[4], col="red", lwd=3)
+  segments(.95, quantile(yHF, na.rm=T)[2], 1.05, quantile(yHF, na.rm=T)[2], col="red", lwd=3)	# first quantile bar for second cohort	
+  segments(.9, median(yHF, na.rm=T), 1.1, median(yHF, na.rm=T), col="red", lwd=3)	# median bar for second cohort, etc
+  segments(.95, quantile(yHF, na.rm=T)[4], 1.05, quantile(yHF, na.rm=T)[4], col="red", lwd=3)	# first quantile bar for second cohort
+  segments(1.0,quantile(yHF, na.rm=T)[2],1.0,quantile(yHF, na.rm=T)[4], col="red", lwd=3)
+# legend	
+pr = signif(t.test(yCD,yHF, paired=FALSE)$p.value,digits=2)			
+pletter=substitute(paste("   ", italic("p"), " = ", pr), list(pr=signif(pr[1], digits=2)))	# Makes the r-value with italicized r
+
+for (i in 1:1) {	
+  if (mean(yCD, na.rm=T)-mean(yHF, na.rm=T) >= 0) { # This calculates positive fold change
+    fc=round(2^(mean(yCD, na.rm=T)-mean(yHF, na.rm=T)),2); legendposition="topright"
+  } else if (mean(yCD, na.rm=T)-mean(yHF, na.rm=T) <= 0) { # This makes it into negative fold change, but SYMMETRICAL (i.e. -0.5 is the same as +2.0 but it's hard to tell)
+    fc=round(-1*(2^(mean(yHF, na.rm=T)-mean(yCD, na.rm=T))),2); legendposition="topleft"
+  } else {	fc = 0; legendposition="topleft"}
+}
+foldchange=paste("FC = ", fc)
+legend(legendposition, bg='white', bty="n", cex=1, text.col="red", legend=c(foldchange, as.expression(pletter)))
