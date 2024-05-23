@@ -1,0 +1,44 @@
+## Kneaddata Workflow
+
+#---------------------------------------------------------------------
+# Create file
+#!/bin/bash -l 
+ 
+# SBATCH -J KneaddataTestWithTRF 
+# SBATCH -N 1 
+# SBATCH --ntasks-per-node=1 
+# SBATCH -c 14
+# SBATCH --time=0-04:00:00 
+# SBATCH -p batch 
+# SBATCH --qos=normal 
+# SBATCH --mail-type=end,fail 
+# SBATCH --mail-user=your email
+
+
+
+module load tools/Singularity 
+
+
+SINGULARITY_FOLDER=/mnt/isilon/projects/hpc-hslt/jschleich/kneaddata 
+INPUT_FOLDER=/scratch/users/alamanna/cecal_RNA_jan172024/Cecum_MT_Backup_Fastq_20240117/cecum_rna/MT/fastq #Folder containg the Fastq files
+INPUT_FILE1=C_233_HF_MT_CECUM_GEM_S20_R1_001.fastq.gz #This is a fastq file, assuming paired-end reads, you will have also a _R2_ fastq.gz in the next line 
+INPUT_FILE2=C_233_HF_MT_CECUM_GEM_S20_R2_001.fastq.gz #This is only necessary for paired-end read data. 
+OUTPUT_FOLDER=/scratch/users/epansart/output_singularity_MT # Create Output Folder for the Outputfiles
+
+DB1=/scratch/users/alamanna/db1 #bowtie2 ribosomal_RNA 
+DB2=/scratch/users/alamanna/db2 #bowtie2  mouse_C57BL
+# If those dataset haven't been downloaded yet you can download from : https://huttenhower.sph.harvard.edu/kneaddata/) 
+# More information can be found in the file 00_setting_up 
+# If working with samples of other species than mice, you have to download the adequate database
+ 
+export SINGULARITY_BIND="$INPUT_FOLDER,$DB1,$DB2,$OUTPUT_FOLDER" 
+singularity run $SINGULARITY_FOLDER/kneaddata.sif kneaddata --threads 128 -i $INPUT_FOLDER/$INPUT_FILE1 -i $INPUT_FOLDER/$INPUT_FILE2 --cat-final-output --serial -o $OUTPUT_FOLDER -db $DB1 -db $DB2
+ 
+# successful processing -> around 25000000 reads it takes approximately between 2 and 3 hours
+
+
+#---------------------------------------------------------------------
+# To run the file: 
+
+si --mem=24000 -t 120
+sbatch -J KneaddataTestWithTRF -N 1 --ntasks-per-node=1 -c 14 --time=0-04:00:00 -p batch --qos=normal --mail-type=end,fail --mail-user=your_email file_name
