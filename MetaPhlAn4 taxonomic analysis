@@ -1,0 +1,131 @@
+# Load necessary libraries
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(readr)
+library(ggalluvial)
+library(reshape2)
+library(data.table)
+library(tibble)
+library(RColorBrewer)
+library(ggh4x)
+
+
+## Set working directory 
+setwd("/Users/emelinepa/Documents/University/4th_semester/Metaphlan/Metagenomic") 
+## Download the data 
+data <- read.csv("/Users/emelinepa/Documents/University/4th_semester/Metaphlan/Metagenomic/datasets/merged_abundance_table.txt", sep = "", header = F)
+data <- data[-1,-c(2,47:66)] # remove the unwanted columns
+
+colnames(data) <- data[1,]
+data <- data[-1,]
+max_length = 5
+new_names = substr(names(data), start = 1, stop = max_length) # Extract the first part of each column name 
+names(data) = new_names # Set the new column names 
+
+info <- read.csv("/Users/emelinepa/Documents/University/4th_semester/Metaphlan/Metagenomic/datasets/Cecum_samples_2024_phenotypes.csv", sep = ";")
+info <- as.data.frame(t(info))
+colnames(info) <- info[1,]
+info <- info[-1,]
+info <- info[, colnames(info) != ""]
+info <- rownames_to_column(info)
+colnames(info)[1] <- "Sample"
+
+## Keep only the bacteria at genus level 
+rownames(data) <- NULL
+data <- data %>% column_to_rownames("clade")
+
+row_names <- rownames(data)
+row_names <- as.data.frame(row_names)
+
+row_names <- row_names %>%
+ separate("row_names", into = c("Kingdom", "Phylum", "Class", "Order", "Familly", "Genus", "Species"), sep = "\\|")
+
+rownames(row_names) = rownames(data)
+
+row_names <- row_names %>% 
+  filter(!is.na(Genus))
+
+row_names <- row_names %>%
+  filter(is.na(Species))
+
+row_names <- as.data.frame(row_names[,-7])
+
+data_final <- data[rownames(row_names), ]
+clade <- rownames(data_final)
+data_final <- cbind(clade, data_final)
+
+## Select the 25 tops bacteria and sum the other bacteria in others, and calculate the sum, if not = to 100 then do ratio and add the ratio to the value 
+data_num <- data_final[,-1][-1,]
+data_num <- as.data.frame(data_num)
+data_num <- data_num %>%
+  mutate(across(everything(), ~ as.numeric(.x)))
+top_25 <- rowSums(data_num)
+top_25 <- cbind(top_25, data_num)
+top_25 <- top_25 %>%
+  arrange(desc(top_25))
+bellow_25 <- top_25[c(26:402),]
+sum_below <- colSums(bellow_25)
+top_25 <- top_25[c(1:25),]
+top_25 <- rbind(top_25, sum_below)
+rownames(top_25)[26] <- "Others"
+top_25 <- top_25[,-1]
+new_row <- colSums(top_25)
+names(new_row) <- names(top_25)
+new_row <- rbind(new_row, top_25)
+row_sum <- new_row[1, ]
+ratio <- row_sum / 100
+ratio <- as.vector(ratio)
+new_row <- new_row + ratio
+new_row <- new_row[-1,]
+new_row$clade <- rownames(new_row)
+
+## Melt the data to convert it from wide to long format
+data_long <- new_row %>%
+  pivot_longer(-clade, names_to = "Sample", values_to = "relative_abundance") %>%
+  mutate
+result_long_1 <- left_join(data_long, info %>% select(Sample, Diet), by = "Sample")
+names(result_long_1)[1] <- "Taxa_name" 
+
+result_long_1$relative_abundance <- as.numeric(result_long_1$relative_abundance) # make sure the abundance column is numeric 
+
+my_colors <- c("#8DD4C8", "#F1F9B5", "#FE8B5F", "#D1EDBB", "#C0B7D5", "#E28A86", "#8AB1C9", "#AEB2A8", "#D3B387", "#F7B366", "#EBBE63", "#D4CA65", "#FB8000", "#E2DFC4", "#AEE0C1", "#CECBD0", "#F4F3B9","#D3A6B7", "#BCDB78", "#E59599", "#F6837A", "#D1D79D", "#BD98A2", "#99A7BE", "#BFD767", "#FDCEE6", "#FAFFCD", "#FFB4AC", "#B5CFE6", "#E6D2C0", "#BBADCE", "#FFB6C1", "#8EA0C8", "#7DC57B", "#AFB3B4")
+
+taxa_order <- result_long_1 %>%
+  group_by(Taxa_name) %>%
+  summarise(mean_rel_abund = mean(relative_abundance)) %>%
+  arrange(desc(mean_rel_abund)) %>%
+  pull(Taxa_name)
+
+result_long_1$Taxa_name_ordered <- factor(result_long_1$Taxa_name, levels = taxa_order)
+
+ggplot(result_long_1, aes(x = Sample,
+                          y = relative_abundance,
+                          fill = Taxa_name_ordered
+)) +
+  geom_bar(position = "fill",
+           stat = "identity",
+           color = "black",
+           size = 0.05,
+           width = 0.7) +
+  #geom_alluvium() +
+  scale_y_continuous(expand = c(0, 0), 
+                     labels = scales::percent_format()) +
+  scale_fill_manual(values = my_colors, 
+                    name = "Taxonomy",
+                    guide = guide_legend(nrow =3)) +
+  theme_bw() +
+  theme_minimal(8) +
+  theme(strip.background = element_blank(),
+        axis.ticks.y = element_line(colour = "black", size = 0.3, lineend = 10),
+        axis.text.x = element_text(face = "bold", size = 8, angle = 90, hjust = 1),
+        axis.text.y = element_text(face = "bold", size = 8),
+        axis.title.x = element_text(margin = margin(0.4, 0, 0, 0, "cm"), face = "bold", size = 9),
+        axis.title.y = element_text(margin = margin(0, 0.2, 0, 0, "cm"), face = "bold", size = 9),
+        legend.title = element_text(margin = margin(1.03, 1.03, 0, 0, "cm"), face = "bold", size = 9),
+        legend.text = element_text(size = 7),
+        legend.position = "bottom",
+        legend.background = element_rect(fill = "white", color = NA),
+        ggh4x.facet.nestline = element_line(colour = "rosybrown")) + 
+  facet_wrap(~Diet, 1, scales = "free_x")
+
