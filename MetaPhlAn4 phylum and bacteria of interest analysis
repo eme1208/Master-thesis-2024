@@ -1,0 +1,759 @@
+
+# Load necessary libraries
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(readr)
+library(ggalluvial)
+library(reshape2)
+library(data.table)
+library(tibble)
+library(RColorBrewer)
+library(ggh4x)
+library(gplots)
+library(outliers)
+library(magrittr)
+library(tidyverse)
+library(vioplot)
+library(openxlsx)
+library(Matrix)
+library(cluster)    
+library(dendextend) 
+library(vegan)
+library(ggpubr)
+library(factoextra)
+
+
+## Dowlaod the 2 data set 
+
+data <- read.csv("/Users/emelinepa/Documents/University/4th_semester/Metaphlan/Metagenomic/datasets/merged_abundance_table.txt", sep = "", header = F)
+data <- data[-1,-c(2,47:66)]
+
+colnames(data) <- data[1,]
+data <- data[-1,]
+max_length = 5
+new_names = substr(names(data), start = 1, stop = max_length) # Extract the first part of each column name 
+names(data) = new_names # Set the new column names 
+colnames(data)[1] <- "taxonomy"
+
+rownames(data) <- NULL
+data <- data %>% column_to_rownames("taxonomy")
+
+row_names <- rownames(data)
+row_names <- as.data.frame(row_names)
+
+row_names <- row_names %>%
+  separate("row_names", into = c("Kingdom", "Phylum", "Class", "Order", "Familly", "Genus", "Species"), sep = "\\|")
+
+rownames(row_names) = rownames(data)
+
+row_names <- row_names %>% 
+  filter(!is.na(Genus))
+
+row_names <- row_names %>%
+  filter(is.na(Species))
+
+row_names <- as.data.frame(row_names[,-7])
+
+data_final <- data[rownames(row_names), ]
+clade <- rownames(data_final)
+data_final <- cbind(clade, data_final)
+colnames(data_final)[1] <- "taxonomy"
+
+
+Z_data <- read.table("/Users/emelinepa/Documents/University/4th_semester/Metaphlan/0_metaDNA_metaphlan4_abundance_all_zy.txt", header = T)
+
+rownames(Z_data) <- NULL
+Z_data <- Z_data %>% column_to_rownames("taxonomy")
+
+row_names <- rownames(Z_data)
+row_names <- as.data.frame(row_names)
+
+row_names <- row_names %>%
+  separate("row_names", into = c("Kingdom", "Phylum", "Class", "Order", "Familly", "Genus", "Species"), sep = "\\|")
+
+rownames(row_names) = rownames(Z_data)
+
+row_names <- row_names %>% 
+  filter(!is.na(Genus))
+
+row_names <- row_names %>%
+  filter(is.na(Species))
+
+row_names <- as.data.frame(row_names[,-7])
+
+Z_data_final <- Z_data[rownames(row_names), ]
+Z_clade <- rownames(Z_data_final)
+Z_data_final <- cbind(Z_clade, Z_data_final)
+colnames(Z_data_final)[1] <- "taxonomy"
+
+
+## Merge the 2 data set, with all taxa
+
+# merged_dataset <- inner_join(data, Z_data, by = "taxonomy")
+# rownames(merged_dataset) <- merged_dataset[,1]
+# merged_dataset <- merged_dataset[,-1]
+# merged_info_diet <- as.data.frame(t(merged_info_diet))
+# names(merged_info_diet) <- merged_info_diet[1,]
+# merged_info_diet <- merged_info_diet[-1,]
+# common_cols <- intersect(names(merged_info_diet), names(merged_dataset))
+# diet_selected <- select(merged_info_diet, common_cols)
+# genus_selected <- select(merged_dataset, common_cols)
+# merged_dataset <- rbind(diet_selected, genus_selected)
+# 
+# write.csv(merged_dataset, "Metaphlan_merged_Ziyun_EA_METADATA.csv")
+# 
+merged_genus <- inner_join(data_final, Z_data_final, by = "taxonomy")
+
+library(Rtsne)
+
+rownames(merged_genus) <- merged_genus[,1] 
+merged_genus <- merged_genus[,-1]
+merged_genus <- as.data.frame(t(merged_genus))
+merged_genus <- as.data.frame(merged_genus)
+merged_genus <- merged_genus %>%
+  mutate(across(everything(), as.numeric))
+M_merged_genust <- as.matrix(merged_genus)
+new_data <- rep("New", times = 45)
+zyun_d <- rep("Old", times = 210)
+Labels_batch <- c(new_data, zyun_d) 
+tsne_out <- Rtsne(M_merged_genust, dims=2, perpelexity = 5, verbose=TRUE)
+df = data.frame(Y1=tsne_out$Y[,1],Y2=tsne_out$Y[,2], labels = Labels_batch)
+require(ggplot2)
+ggplot(df,aes(Y1,Y2,colour=Labels_batch)) + geom_point()
+
+## Taxonomy analysis 
+
+## Select the 25 tops bacteria and sum the other bacteria in others, and calculate the sum, if not = to 100 then do ratio and add the ratio to the value 
+data_num <- as.data.frame(t(merged_genus))
+data_num <- as.data.frame(data_num)
+data_num <- data_num %>%
+  mutate(across(everything(), ~ as.numeric(.x)))
+top_25 <- rowSums(data_num)
+top_25 <- cbind(top_25, data_num)
+top_25 <- top_25 %>%
+  arrange(desc(top_25))
+bellow_25 <- top_25[c(26:256),]
+sum_below <- colSums(bellow_25)
+top_25 <- top_25[c(1:25),]
+top_25 <- rbind(top_25, sum_below)
+rownames(top_25)[26] <- "Others"
+top_25 <- top_25[,-1]
+new_row <- colSums(top_25)
+names(new_row) <- names(top_25)
+new_row <- rbind(new_row, top_25)
+row_sum <- new_row[1, ]
+ratio <- row_sum / 100
+ratio <- as.vector(ratio)
+new_row <- new_row + ratio
+new_row <- new_row[-1,]
+new_row$clade <- rownames(new_row)
+
+## Melt the data to convert it from wide to long format
+data_long <- new_row %>%
+  pivot_longer(-clade, names_to = "Sample", values_to = "relative_abundance") %>%
+  mutate
+
+info <- read.csv("/Users/emelinepa/Documents/University/4th_semester/Metaphlan/Metagenomic/datasets/Cecum_samples_2024_phenotypes.csv", sep = ";")
+info <- as.data.frame(t(info))
+colnames(info) <- info[1,]
+info <- info[-1,]
+info <- info[, colnames(info) != ""]
+info <- rownames_to_column(info)
+colnames(info)[1] <- "Sample"
+
+diet_info <- info[, c("Sample", "Diet")]
+
+Z_info <- read.csv("/Users/emelinepa/Documents/University/4th_semester/Metaphlan/1_Phenotypes_Metadata.csv", sep = ",")
+names(Z_info)[4] <- "Sample" 
+names(Z_info)[21] <- "Diet" 
+
+diet_z <- Z_info[, c("Sample", "Diet")]
+
+merged_info_diet <- rbind(diet_info, diet_z)
+
+result_long_1 <- left_join(data_long, merged_info_diet %>% select(Sample, Diet), by = "Sample")
+names(result_long_1)[1] <- "Taxa_name" 
+result_long_1 <- drop_na(result_long_1)
+
+result_long_1$relative_abundance <- as.numeric(result_long_1$relative_abundance) # make sure the abundance column is numeric 
+
+my_colors <- c("#8DD4C8", "#F1F9B5", "#FE8B5F", "#D1EDBB", "#C0B7D5", "#E28A86", "#8AB1C9", "#AEB2A8", "#D3B387", "#F7B366", "#EBBE63", "#D4CA65", "#FB8000", "#E2DFC4", "#AEE0C1", "#CECBD0", "#F4F3B9","#D3A6B7", "#BCDB78", "#E59599", "#F6837A", "#D1D79D", "#BD98A2", "#99A7BE", "#BFD767", "#FDCEE6", "#FAFFCD", "#FFB4AC", "#B5CFE6", "#E6D2C0", "#BBADCE", "#FFB6C1", "#8EA0C8", "#7DC57B", "#AFB3B4")
+
+taxa_order <- result_long_1 %>%
+  group_by(Taxa_name) %>%
+  summarise(mean_rel_abund = mean(relative_abundance)) %>%
+  arrange(desc(mean_rel_abund)) %>%
+  pull(Taxa_name)
+
+result_long_1$Taxa_name_ordered <- factor(result_long_1$Taxa_name, levels = taxa_order)
+
+ggplot(result_long_1, aes(x = Sample,
+                          y = relative_abundance,
+                          fill = Taxa_name_ordered
+)) +
+  geom_bar(position = "fill",
+           stat = "identity",
+           color = "black",
+           size = 0.05,
+           width = 0.7) +
+  #geom_alluvium() +
+  scale_y_continuous(expand = c(0, 0), 
+                     labels = scales::percent_format()) +
+  scale_fill_manual(values = my_colors, 
+                    name = "Taxonomy",
+                    guide = guide_legend(nrow =3)) +
+  theme_bw() +
+  theme_minimal(8) +
+  theme(strip.background = element_blank(),
+        axis.ticks.y = element_line(colour = "black", size = 0.3, lineend = 10),
+        axis.text.x = element_text(face = "bold", size = 8, angle = 90, hjust = 1),
+        axis.text.y = element_text(face = "bold", size = 8),
+        axis.title.x = element_text(margin = margin(0.4, 0, 0, 0, "cm"), face = "bold", size = 9),
+        axis.title.y = element_text(margin = margin(0, 0.2, 0, 0, "cm"), face = "bold", size = 9),
+        legend.title = element_text(margin = margin(1.03, 1.03, 0, 0, "cm"), face = "bold", size = 9),
+        legend.text = element_text(size = 7),
+        legend.position = "bottom",
+        legend.background = element_rect(fill = "white", color = NA),
+        ggh4x.facet.nestline = element_line(colour = "rosybrown")) + 
+  facet_wrap(~Diet, 1, scales = "free_x")
+
+
+
+## Differential taxa 
+
+diet <- as.data.frame(t(merged_info_diet))
+colnames(diet) <- diet[1,]
+diet <- diet[-1,]
+genus <- as.data.frame(t(merged_genus))
+common_cols <- intersect(names(diet), names(genus))
+diet_selected <- select(diet, common_cols)
+genus_selected <- select(genus, common_cols)
+data_diet <- rbind(diet_selected, genus_selected)
+
+
+
+CD_diet <- data_diet[, data_diet["Diet",] == "CD", drop = FALSE] # extract samples with CD 
+HF_diet <- data_diet[, data_diet["Diet",] == "HF", drop = FALSE] # extract samples with HF 
+
+
+## T-test, remove everything above 0.05
+order_data <- cbind(CD_diet, HF_diet) # bind each diet data together 
+order_data <- order_data[-1,] # remove rows that have the phenotype 
+order_data <- order_data %>%
+  mutate(across(everything(), as.numeric)) # make sure everything is numeric 
+
+# Calculate the p-value in a loop 
+p_value <- NULL # create an empty vector 
+for (i in 1:nrow(order_data)) {
+  result <- t.test(order_data[i,1:135], order_data[i,136:245])
+  p_value <- c(p_value, result$p.value)
+}
+
+order_data <- order_data %>%
+  mutate(p_value = p_value) # add the vector with the p-values to the table 
+
+order_data$adjusted_p_value <- p.adjust(order_data$p_value, method = "BH")
+
+# Filter to only keep the significant genes 
+filtered_order_data <- order_data %>%
+  filter(`p_value` <= 0.05) # Had 403 different genus, left with 138 significant genus    
+
+## -10log(0)
+p_value_only <- as.data.frame(filtered_order_data[, 247]) # extract only the p-values
+log_10_p <- NULL # create an empty vector 
+
+# Calculate the -log10(p) in a loop 
+for (i in 1:nrow(p_value_only)) {
+  log_10_p <- c(log_10_p, -log10(p_value_only[i, 1]))
+}
+
+filtered_order_data <- filtered_order_data %>%
+  mutate(log_10_p = log_10_p) # add the vector with the -log10(p) to the table
+
+## Fold change
+# Calculate the mean
+# CD diet 
+mean_CD <- filtered_order_data[,1:135] # remove the 3 first row
+mean_CD <- mean_CD %>%
+  mutate(across(everything(), as.numeric)) # make sure that everything is numeric
+mean_CD <- mean_CD %>%
+  mutate(Mean_CD = rowMeans(., na.rm = TRUE)) # calculate the mean for each gene 
+
+# HF diet
+mean_HF <- filtered_order_data[,136:245] # remove the 3 first row
+mean_HF <- mean_HF %>%
+  mutate(across(everything(), as.numeric)) # make sure that everything is numeric
+mean_HF <- mean_HF %>%
+  mutate(Mean_HF = rowMeans(., na.rm = TRUE)) # calculate the mean for each gene 
+
+# Create a new table with just the mean 
+mean_CD <- mean_CD[, "Mean_CD", drop = FALSE] # table with just CD mean 
+mean_HF <- mean_HF[, "Mean_HF", drop = FALSE] # table with just HF mean
+mean_all <- cbind(mean_CD, mean_HF) # bind both mean together 
+
+## Calculate the fold change 
+mean_all <- mean_all %>%
+  mutate(across(everything(), as.numeric)) # make sure everything is numeric 
+
+fold_change <- NULL # create an empty vector 
+
+for (i in 1:nrow(mean_all)) {
+  fold_change <- c(fold_change, mean_all[i, 1]-mean_all[i, 2])
+}
+
+filtered_order_data <- filtered_order_data %>%
+  mutate(log2FC = fold_change) # add the vector with the fold change to the table
+
+
+## Volcano plot 
+volcano_CD_vs_HF <- filtered_order_data %>%
+  rownames_to_column(var = "Genus")
+
+# volcano_label <- volcano_CD_vs_HF[,c(1,48:50)] # table with just the genes name, -log10(p) and the fold change
+top_genus <- head(volcano_CD_vs_HF[order(-volcano_CD_vs_HF$log_10_p), ], 11)
+
+ggplot(volcano_CD_vs_HF, aes(x = log2FC, y = log_10_p, color = log2FC > 0)) +
+  xlim(-2,2) +
+  geom_point(size = 2) +
+  geom_hline(yintercept = 2.3, linetype = "dashed", color = "red") +
+  geom_vline(xintercept = c(-0.30, 0.30), linetype = "dashed", color = "red") +
+  geom_text(data = top_genus, aes(label = Genus), vjust = -0.5, hjust = 0, color = "black", size = 3) +
+  labs(title = "Difefrential microbiome abundance at the genus level in cecum between CD and HF diet",
+       x = "Log2 Fold Change",
+       y = "-log10(p)") +
+  theme_minimal() +
+  scale_color_manual(values = c("blue", "red"),
+                     labels = c("CD", "HF")) +
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+## Other graphs 
+# Boxplot 
+violin_data <- cbind(CD_diet, HF_diet) #bind table of both diets together 
+violin_data <- violin_data[c(1:2),]
+violin_data <- as.data.frame(t(violin_data))
+boxplot(as.numeric(violin_data$`k__Bacteria|p__Firmicutes|c__Clostridia|o__Eubacteriales|f__Lachnospiraceae|g__Lachnospiraceae_unclassified`)~as.factor(violin_data$Diet),xlab = "Diet")
+
+
+# Violin plot: CD vs. HF 
+vioplot(as.numeric(violin_data$`k__Bacteria|p__Firmicutes|c__Clostridia|o__Eubacteriales|f__Lachnospiraceae|g__Lachnospiraceae_unclassified`)~as.factor(violin_data$Diet),xlab = "Diet", ylab = "bacteria genus level", col= "red")
+
+
+## Phylum level analysis 
+
+new_data_diet <- read.csv("/Users/emelinepa/Documents/University/4th_semester/Metaphlan/Metagenomic/Metaphlan_merged_Ziyun_EA_METADATA.csv", row.names = 1)
+new_data <- new_data_diet[-1,]
+
+phylum_names <- rownames(new_data)
+phylum_names <- as.data.frame(phylum_names)
+
+phylum_names <- phylum_names %>%
+  separate("phylum_names", into = c("Kingdom", "Phylum", "Class", "Order", "Familly", "Genus", "Species"), sep = "\\|")
+
+rownames(phylum_names) = rownames(new_data)
+
+phylum_names <- phylum_names %>% 
+  filter(!is.na(Phylum))
+
+phylum_names <- phylum_names %>%
+  filter(is.na(Class))
+
+phylum_names <- as.data.frame(phylum_names[,-c(3:7)])
+
+data_phylum <- new_data[rownames(phylum_names), ]
+clade_p <- rownames(data_phylum)
+data_phylum <- cbind(clade_p, data_phylum)
+colnames(data_phylum)[1] <- "taxonomy"
+
+data_phylum <- data_phylum[,-1]
+data_phylum <- rbind(new_data_diet[1,], data_phylum)
+
+# Firmicutes / Bacteroidetes box plot 
+phylum_bp <- data_phylum[c(1:2,5),]
+phylum_bp <- as.data.frame(t(phylum_bp))
+phylum_bp$`k__Bacteria|p__Firmicutes` <- as.numeric(phylum_bp$`k__Bacteria|p__Firmicutes`)
+phylum_bp$`k__Bacteria|p__Bacteroidetes` <- as.numeric(phylum_bp$`k__Bacteria|p__Bacteroidetes`)
+phylum_bp$ratio <- phylum_bp[,2]/phylum_bp[,3]
+phylum_bp <- na.omit(phylum_bp[!is.infinite(phylum_bp$ratio),])
+boxplot(as.numeric(phylum_bp$ratio)~as.factor(phylum_bp$Diet),xlab = "Diet", main = "Firmicutes / Bacteroidetes")
+
+
+tibble <- as_tibble(phylum_bp)
+t_test_result <- t.test(ratio ~ Diet, data = tibble)
+p_value <- t_test_result$p.value
+ggplot(data = tibble, aes(x = Diet, y = ratio)) +
+  geom_boxplot(fill = "transparent", color = "black") +
+  geom_point(aes(color = Diet), size = 3) +  
+  scale_color_manual(values = c("HF" = "orange", "CD" = "blue")) +  
+  labs(x = "Diet", y = "Ratio Firmicutes / Bacteroidetes", title = "Firmicutes / Bacteroidetes by Diet") +
+  theme(legend.position = "right") +
+  geom_text(aes(label = paste("p-value =", round(p_value, 6))), 
+            x = 1.5, y = Inf, 
+            hjust = 0.5, vjust = 2.5, color = "black", size = 4)
+
+
+## Firmicutes / Bacteroidetes vs weight 
+# Load the meta data 
+names(info)[7] <- "Weight" 
+weigth <- info[, c("Sample", "Weight")]
+
+names(Z_info)[17] <- "Weight" 
+z_weigth <- Z_info[, c("Sample", "Weight")]
+
+merged_weigth <- rbind(weigth, z_weigth)
+merged_weigth <- as.data.frame(t(merged_weigth))
+names(merged_weigth) <- merged_weigth[1,]
+merged_weigth <- merged_weigth[-1,]
+
+phylum_weight <- as.data.frame(t(phylum_bp))
+
+common_cols <- intersect(names(merged_weigth), names(phylum_weight))
+weigth_selected <- select(merged_weigth, common_cols)
+ph_selected <- select(phylum_weight, common_cols)
+phylum_weight <- rbind(weigth_selected, ph_selected)
+
+
+phylum_weight <- as.data.frame(t(phylum_weight))
+
+phylum_weight$`k__Bacteria|p__Firmicutes` <- as.numeric(phylum_weight$`k__Bacteria|p__Firmicutes`)
+phylum_weight$`k__Bacteria|p__Bacteroidetes` <- as.numeric(phylum_weight$`k__Bacteria|p__Bacteroidetes`)
+phylum_weight$Weight <- as.numeric(phylum_weight$Weight) 
+phylum_weight <- drop_na(phylum_weight) # exclude sample C_329 because no phenotypes data 
+phylum_weight <- data.frame(SampleID = row.names(phylum_weight), phylum_weight)
+
+
+names(phylum_weight)[names(phylum_weight) == "k__Bacteria.p__Firmicutes"] <- "firmicutes"
+names(phylum_weight)[names(phylum_weight) == "k__Bacteria.p__Bacteroidetes"] <- "bacteroidetes"
+ggscatter(phylum_weight, x = "firmicutes", y = "Weight", 
+          add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "Relative abundance (%)", ylab = "Weight (g)",
+          title = "Correlation between firmicutes and Weight",
+          add.line = list(color = "red"))
+
+
+ggscatter(phylum_weight, x = "bacteroidetes", y = "Weight", 
+          add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "Relative abundance (%)", ylab = "Weight (g)",
+          title = "Correlation between Bacteroidetes and Weight",
+          add.line = list(color = "green"))
+
+
+age <- info[, c("Sample", "Age")]
+
+names(Z_info)[10] <- "Age" 
+z_age <- Z_info[, c("Sample", "Age")]
+
+merged_age <- rbind(age, z_age)
+merged_age <- as.data.frame(t(merged_age))
+names(merged_age) <- merged_age[1,]
+merged_age <- merged_age[-1,]
+
+phylum_age <- as.data.frame(t(phylum_bp))
+
+common_cols <- intersect(names(merged_age), names(phylum_age))
+weigth_selected <- select(merged_age, common_cols)
+ph_selected <- select(phylum_age, common_cols)
+phylum_age <- rbind(weigth_selected, ph_selected)
+
+phylum_age <- as.data.frame(t(phylum_age))
+
+phylum_age <- phylum_age %>% 
+  mutate(AGE_CAT = case_when(
+    Age < 250 ~ "250",
+    Age > 250 & Age <= 450 ~ "450",
+    Age > 450 ~ "650"
+  ))
+
+
+tibble_age <- as_tibble(phylum_age)
+
+tibble_250 <- tibble_age %>% filter(AGE_CAT == 250)
+tibble_250$ratio <- as.numeric(tibble_250$ratio)
+
+tibble_450 <- tibble_age %>% filter(AGE_CAT == 450)
+tibble_450$ratio <- as.numeric(tibble_450$ratio)
+
+tibble_650 <- tibble_age %>% filter(AGE_CAT == 650)
+tibble_650$ratio <- as.numeric(tibble_650$ratio)
+
+boxplot(as.numeric(tibble_250$ratio)~as.factor(tibble_250$Diet),xlab = "Diet", main = "Firmicutes / Bacteroidetes")
+boxplot(as.numeric(tibble_450$ratio)~as.factor(tibble_450$Diet),xlab = "Diet", main = "Firmicutes / Bacteroidetes")
+boxplot(as.numeric(tibble_650$ratio)~as.factor(tibble_650$Diet),xlab = "Diet", main = "Firmicutes / Bacteroidetes")
+
+library(gridExtra)
+
+
+t_test_result_250 <- t.test(ratio ~ Diet, data = tibble_250)
+p_value_250 <- t_test_result_250$p.value
+plot_250 <- ggplot(data = tibble_250, aes(x = Diet, y = ratio)) +
+  geom_boxplot(fill = "transparent", color = "black") +
+  geom_point(aes(color = Diet), size = 3) +  
+  scale_color_manual(values = c("HF" = "orange", "CD" = "blue")) +  
+  labs(x = "Diet", y = "Ratio Firmicutes / Bacteroidetes", title = "Firmicutes / Bacteroidetes by Diet") +
+  theme(legend.position = "right") +
+  geom_text(aes(label = paste("p-value =", round(p_value_250, 3))), 
+            x = 1.5, y = Inf, 
+            hjust = 0.5, vjust = 2.5, color = "black", size = 4)
+
+t_test_result_450 <- t.test(ratio ~ Diet, data = tibble_450)
+p_value_450 <- t_test_result_450$p.value
+plot_450 <- ggplot(data = tibble_450, aes(x = Diet, y = ratio)) +
+  geom_boxplot(fill = "transparent", color = "black") +
+  geom_point(aes(color = Diet), size = 3) +  
+  scale_color_manual(values = c("HF" = "orange", "CD" = "blue")) +  
+  labs(x = "Diet", y = "Ratio Firmicutes / Bacteroidetes", title = "Firmicutes / Bacteroidetes by Diet") +
+  theme(legend.position = "right") +
+  geom_text(aes(label = paste("p-value =", round(p_value_450, 6))), 
+            x = 1.5, y = Inf, 
+            hjust = 0.5, vjust = 2.5, color = "black", size = 4)
+
+t_test_result_650 <- t.test(ratio ~ Diet, data = tibble_650)
+p_value_650 <- t_test_result_650$p.value
+plot_650 <- ggplot(data = tibble_650, aes(x = Diet, y = ratio)) +
+  geom_boxplot(fill = "transparent", color = "black") +
+  geom_point(aes(color = Diet), size = 3) +  
+  scale_color_manual(values = c("HF" = "orange", "CD" = "blue")) +  
+  labs(x = "Diet", y = "Ratio Firmicutes / Bacteroidetes", title = "Firmicutes / Bacteroidetes by Diet") +
+  theme(legend.position = "right") +
+  geom_text(aes(label = paste("p-value =", round(p_value_650, 6))), 
+            x = 1.5, y = Inf, 
+            hjust = 0.5, vjust = 2.5, color = "black", size = 4)
+
+grid.arrange(plot_250, plot_450, plot_650, ncol = 3)
+
+
+## Slected bacteria: k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904 
+## Abundance higher in HF mice, and p-value: 4.730804e-09
+
+# box plot 
+row_index <- which(row.names(new_data_diet) == "k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904")
+interested_bp <- new_data_diet[c(1,216), ]
+interested_bp <- as.data.frame(t(interested_bp))
+interested_bp$`k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904` <- as.numeric(interested_bp$`k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904`)
+boxplot(as.numeric(interested_bp$`k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904`)~as.factor(interested_bp$Diet),xlab = "Diet", main = "Interested unknown bacteria")
+
+
+tibble_interest <- as_tibble(interested_bp)
+t_test_result <- t.test(`k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904` ~ Diet, data = tibble_interest)
+p_value <- t_test_result$p.value
+ggplot(data = tibble_interest, aes(x = Diet, y = `k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904`)) +
+  geom_boxplot(fill = "transparent", color = "black") +
+  geom_point(aes(color = Diet), size = 3) +  
+  scale_color_manual(values = c("HF" = "orange", "CD" = "blue")) +  
+  labs(x = "Diet", y = "Abundance", title = "k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904") +
+  theme(legend.position = "right") +
+  geom_text(aes(label = paste("p-value =", round(p_value, 10))), 
+            x = 1.5, y = Inf, 
+            hjust = 0.5, vjust = 2.5, color = "black", size = 4)
+
+
+## Interest bacterium vs weight 
+
+interested_weight <- as.data.frame(t(interested_bp))
+
+common_cols <- intersect(names(merged_weigth), names(interested_weight))
+weigth_selected <- select(merged_weigth, common_cols)
+in_selected <- select(interested_weight, common_cols)
+interested_weight <- rbind(weigth_selected, in_selected)
+
+
+interested_weight <- as.data.frame(t(interested_weight))
+interested_weight$Weight <- as.numeric(interested_weight$Weight)
+interested_weight <- drop_na(interested_weight)
+
+interested_weight <- interested_weight %>% 
+  mutate(CAT_WEIGHT = case_when(
+    Weight <= quantile(Weight, 0.25) ~ "1",
+    Weight > quantile(Weight, 0.25) & Weight <= quantile(Weight, 0.5) ~ "2",
+    Weight > quantile(Weight, 0.5) & Weight <= quantile(Weight, 0.75) ~ "3",
+    Weight > quantile(Weight, 0.75) ~ "4"
+  ))
+
+
+tibble_weight <- as_tibble(interested_weight)
+
+tibble_1 <- tibble_weight %>% filter(CAT_WEIGHT == 1)
+tibble_1$`k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904` <- as.numeric(tibble_1$`k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904`)
+
+tibble_2 <- tibble_weight %>% filter(CAT_WEIGHT == 2)
+tibble_2$`k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904` <- as.numeric(tibble_2$`k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904`)
+
+tibble_3 <- tibble_weight %>% filter(CAT_WEIGHT == 3)
+tibble_3$`k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904` <- as.numeric(tibble_3$`k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904`)
+
+tibble_4 <- tibble_weight %>% filter(CAT_WEIGHT == 4)
+tibble_4$`k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904` <- as.numeric(tibble_4$`k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904`)
+
+boxplot(as.numeric(tibble_1$`k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904`)~as.factor(tibble_1$Diet),xlab = "Diet", main = "g__GGB28904")
+boxplot(as.numeric(tibble_2$`k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904`)~as.factor(tibble_2$Diet),xlab = "Diet", main = "g__GGB28904")
+boxplot(as.numeric(tibble_3$`k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904`)~as.factor(tibble_3$Diet),xlab = "Diet", main = "g__GGB28904")
+
+library(gridExtra)
+
+
+t_test_result_1 <- t.test(`k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904` ~ Diet, data = tibble_1)
+p_value_1 <- t_test_result_1$p.value
+plot_1 <- ggplot(data = tibble_1, aes(x = Diet, y = `k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904`)) +
+  geom_boxplot(fill = "transparent", color = "black") +
+  geom_point(aes(color = Diet), size = 3) +  
+  scale_color_manual(values = c("HF" = "orange", "CD" = "blue")) +  
+  labs(x = "Diet", y = "Relative abundance", title = "Interest bacterium: g__GGB28904") +
+  theme(legend.position = "right") +
+  geom_text(aes(label = paste("p-value =", round(p_value_1, 3))), 
+            x = 1.5, y = Inf, 
+            hjust = 0.5, vjust = 2.5, color = "black", size = 4)
+
+t_test_result_2 <- t.test(`k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904` ~ Diet, data = tibble_2)
+p_value_2 <- t_test_result_2$p.value
+plot_2 <- ggplot(data = tibble_2, aes(x = Diet, y = `k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904`)) +
+  geom_boxplot(fill = "transparent", color = "black") +
+  geom_point(aes(color = Diet), size = 3) +  
+  scale_color_manual(values = c("HF" = "orange", "CD" = "blue")) +  
+  labs(x = "Diet", y = "Relative abundance", title = "Interest bacterium: g__GGB28904") +
+  theme(legend.position = "right") +
+  geom_text(aes(label = paste("p-value =", round(p_value_2, 6))), 
+            x = 1.5, y = Inf, 
+            hjust = 0.5, vjust = 2.5, color = "black", size = 4)
+
+t_test_result_3 <- t.test(`k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904` ~ Diet, data = tibble_3)
+p_value_3 <- t_test_result_3$p.value
+plot_3 <- ggplot(data = tibble_3, aes(x = Diet, y = `k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904`)) +
+  geom_boxplot(fill = "transparent", color = "black") +
+  geom_point(aes(color = Diet), size = 3) +  
+  scale_color_manual(values = c("HF" = "orange", "CD" = "blue")) +  
+  labs(x = "Diet", y = "Relative abundance", title = "Interest bacterium: g__GGB28904") +
+  theme(legend.position = "right") +
+  geom_text(aes(label = paste("p-value =", round(p_value_3, 6))), 
+            x = 1.5, y = Inf, 
+            hjust = 0.5, vjust = 2.5, color = "black", size = 4)
+
+t_test_result_4 <- t.test(`k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904` ~ Diet, data = tibble_4)
+p_value_4 <- t_test_result_4$p.value
+plot_4 <- ggplot(data = tibble_4, aes(x = Diet, y = `k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904`)) +
+  geom_boxplot(fill = "transparent", color = "black") +
+  geom_point(aes(color = Diet), size = 3) +  
+  scale_color_manual(values = c("HF" = "orange", "CD" = "blue")) +  
+  labs(x = "Diet", y = "Relative abundance", title = "Interest bacterium: g__GGB28904") +
+  theme(legend.position = "right") +
+  geom_text(aes(label = paste("p-value =", round(p_value_4, 6))), 
+            x = 1.5, y = Inf, 
+            hjust = 0.5, vjust = 2.5, color = "black", size = 4)
+
+grid.arrange(plot_1, plot_2, plot_3, plot_4, ncol = 4)
+
+interested_weight$`k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904` <- as.numeric(interested_weight$`k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904`)
+interested_weight$Weight <- as.numeric(interested_weight$Weight)
+interested_weight <- drop_na(interested_weight) # exclude sample C_329 because no phenotypes data 
+interested_weight <- data.frame(SampleID = row.names(interested_weight), interested_weight)
+
+ggscatter(interested_weight, x = "k__Bacteria.p__Bacteria_unclassified.c__CFGB76064.o__OFGB76064.f__FGB76064.g__GGB28904", y = "Weight", 
+          add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "Relative abundance (%)", ylab = "Weight (g)",
+          title = "Correlation between bacterium of interested and Weight",
+          add.line = list(color = "red"))
+
+## Removing the "outliers"
+int_weight_no_outliers <- interested_weight %>% 
+  filter(`k__Bacteria.p__Bacteria_unclassified.c__CFGB76064.o__OFGB76064.f__FGB76064.g__GGB28904` <= 20)
+
+ggscatter(int_weight_no_outliers, x = "k__Bacteria.p__Bacteria_unclassified.c__CFGB76064.o__OFGB76064.f__FGB76064.g__GGB28904", y = "Weight", 
+          add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "Relative abundance (%)", ylab = "Weight (g)",
+          title = "Correlation between bacterium of interested and Weight",
+          add.line = list(color = "red"))
+
+
+## weigth does not seem to have an impact on the abundance 
+
+## Study with age age 
+
+interest_age <- as.data.frame(t(interested_bp))
+
+common_cols <- intersect(names(merged_age), names(interest_age))
+weigth_selected <- select(merged_age, common_cols)
+in_selected <- select(interest_age, common_cols)
+interest_age <- rbind(weigth_selected, in_selected)
+
+interest_age <- as.data.frame(t(interest_age))
+
+interest_age <- interest_age %>% 
+  mutate(AGE_CAT = case_when(
+    Age < 250 ~ "250",
+    Age > 250 & Age <= 450 ~ "450",
+    Age > 450 ~ "650"
+  ))
+
+
+tibble_age <- as_tibble(interest_age)
+
+tibble_250 <- tibble_age %>% filter(AGE_CAT == 250)
+tibble_250$`k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904` <- as.numeric(tibble_250$`k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904`)
+
+tibble_450 <- tibble_age %>% filter(AGE_CAT == 450)
+tibble_450$`k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904` <- as.numeric(tibble_450$`k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904`)
+
+tibble_650 <- tibble_age %>% filter(AGE_CAT == 650)
+tibble_650$`k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904` <- as.numeric(tibble_650$`k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904`)
+
+boxplot(as.numeric(tibble_250$`k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904`)~as.factor(tibble_250$Diet),xlab = "Diet", main = "Firmicutes / Bacteroidetes")
+boxplot(as.numeric(tibble_450$`k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904`)~as.factor(tibble_450$Diet),xlab = "Diet", main = "Firmicutes / Bacteroidetes")
+boxplot(as.numeric(tibble_650$`k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904`)~as.factor(tibble_650$Diet),xlab = "Diet", main = "Firmicutes / Bacteroidetes")
+
+library(gridExtra)
+
+
+t_test_result_250 <- t.test(`k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904` ~ Diet, data = tibble_250)
+p_value_250 <- t_test_result_250$p.value
+plot_250 <- ggplot(data = tibble_250, aes(x = Diet, y = `k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904`)) +
+  geom_boxplot(fill = "transparent", color = "black") +
+  geom_point(aes(color = Diet), size = 3) +  
+  scale_color_manual(values = c("HF" = "orange", "CD" = "blue")) +  
+  labs(x = "Diet", y = "Relative abundance", title = "Interest bacterium") +
+  theme(legend.position = "right") +
+  geom_text(aes(label = paste("p-value =", round(p_value_250, 3))), 
+            x = 1.5, y = Inf, 
+            hjust = 0.5, vjust = 2.5, color = "black", size = 4)
+
+t_test_result_450 <- t.test(`k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904` ~ Diet, data = tibble_450)
+p_value_450 <- t_test_result_450$p.value
+plot_450 <- ggplot(data = tibble_450, aes(x = Diet, y = `k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904`)) +
+  geom_boxplot(fill = "transparent", color = "black") +
+  geom_point(aes(color = Diet), size = 3) +  
+  scale_color_manual(values = c("HF" = "orange", "CD" = "blue")) +  
+  labs(x = "Diet", y = "Relative abundance", title = "Interest bacterium") +
+  theme(legend.position = "right") +
+  geom_text(aes(label = paste("p-value =", round(p_value_450, 6))), 
+            x = 1.5, y = Inf, 
+            hjust = 0.5, vjust = 2.5, color = "black", size = 4)
+
+t_test_result_650 <- t.test(`k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904` ~ Diet, data = tibble_650)
+p_value_650 <- t_test_result_650$p.value
+plot_650 <- ggplot(data = tibble_650, aes(x = Diet, y = `k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904`)) +
+  geom_boxplot(fill = "transparent", color = "black") +
+  geom_point(aes(color = Diet), size = 3) +  
+  scale_color_manual(values = c("HF" = "orange", "CD" = "blue")) +  
+  labs(x = "Diet", y = "Relative abundance", title = "Interest bacterium") +
+  theme(legend.position = "right") +
+  geom_text(aes(label = paste("p-value =", round(p_value_650, 6))), 
+            x = 1.5, y = Inf, 
+            hjust = 0.5, vjust = 2.5, color = "black", size = 4)
+
+grid.arrange(plot_250, plot_450, plot_650, ncol = 3)
+
+interest_age$`k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904` <- as.numeric(interest_age$`k__Bacteria|p__Bacteria_unclassified|c__CFGB76064|o__OFGB76064|f__FGB76064|g__GGB28904`)
+interest_age$Age <- as.numeric(interest_age$Age)
+interest_age <- drop_na(interest_age) # exclude sample C_329 because no phenotypes data 
+interest_age <- data.frame(SampleID = row.names(interest_age), interest_age)
+
+
+ggscatter(interest_age, x = "k__Bacteria.p__Bacteria_unclassified.c__CFGB76064.o__OFGB76064.f__FGB76064.g__GGB28904", y = "Age", 
+          add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "Relative abundance (%)", ylab = "Age (days)",
+          title = "Correlation between bacterium of interested and Age",
+          add.line = list(color = "red"))
