@@ -1,0 +1,49 @@
+## R Blast 
+
+## 1st step:
+
+# Download the dataset on the hard drive (Need at least 4 TB), takes around 3 days to download everything:
+
+wget -r -np -nH -A "*genomic*.gz" ftp://ftp.ncbi.nlm.nih.gov/refseq/release/bacteria/ 
+
+# ftp://ftp.ncbi.nlm.nih.gov/refseq/release/bacteria/ this is to download the bacterial genome, can find also the genome for other organism  
+
+# Data can be found on the hard drive Seagate (was downloaded at the end of March 2024) 
+
+## Next step is to unzip the files (can be done on the terminal or in R) 
+
+gunzip /Volumes/Expansion/Metaphlan4_Analysis/ref/refseq/release/bacteria/*
+
+## Create the concatenated file 
+
+cat /Volumes/Expansion/Metaphlan4_Analysis/ref/refseq/release/bacteria/*.fna > /Volumes/Shield4TB/Users/evangw/Desktop/bacteria_all.fasta
+
+# File can be found ont the hard drive Toshiba (Evan_Personal)
+
+## Download the Blast+ software from the following link 
+
+https://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/LATEST/
+ 
+# Note that all the download software need to be in the working directory of the R file 
+# Software can be found on hard drive Seagate (was downloaded at the end of March 2024) 
+ 
+## Prepare sequence for blasting 
+ 
+# Sequence needs to be in a FASTA format if it is not a FASTA file then
+# If you want to Blast an unknown sequence form MetaPhlan4 find the SG code in the microorganisms-2800384-supplementary.pdf (on Seagate) by pasting the GGB code (ex: GGB23855)
+# Now you can connect to the HPC and go in the directory of the mpa_vOct22_CHOCOPhlAnSGB_202212_SGB.fna 
+
+cd /scratch/users/alamanna/ENTER/envs/metaphlan/lib/python3.7/site-packages/metaphlan/metaphlan_databases/
+ 
+# Now extract just the wanted sequences using grep 
+​
+grep -i 'SGB_CODE' -A 20  mpa_vOct22_CHOCOPhlAnSGB_202212_SGB.fna > FILE_NAME.txt
+
+# Copy file on the computer 
+
+ ## 3rd step:
+ 
+ # Run the RScript in RStudio  
+ 
+ # file name: R_blast.Rmd 
+ 
