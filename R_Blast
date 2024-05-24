@@ -1,0 +1,169 @@
+
+# https://github.com/rsh249/bio331_2021/blob/main/R/BLAST_metagenomics_demo.R
+
+
+# Set working directory (same as downloaded software)
+setwd("/Volumes/Expansion/Metaphlan4_Analysis/")
+
+# Load the packages
+
+# If not downloaded yet
+#if (!require("BiocManager", quietly = TRUE))
+#    install.packages("BiocManager")
+
+install.packages("devtools")
+library(devtools)
+devtools::install_github("sherrillmix/taxonomizr") 
+
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install(version = "3.18")
+BiocManager::install("Biostrings")
+
+install.packages('rBLAST', repos = 'https://mhahsler.r-universe.dev')
+install.packages("taxonomy")
+install.packages("rstan")
+install.packages("callr")
+
+library(tidyr)		
+library(tidyverse)
+library(readtext)
+library(rBLAST)
+library(phylotools)
+library(Biostrings)
+library(taxonomizr)
+library(rstan)
+library(callr)
+library(xlsx)
+
+#BiocManager::install("BiocFileCache")
+
+
+# Trasform txt file into a fasta file
+
+sequences <- readLines("DIRECTORY_TXT_FILE/FILE_NAME.txt")
+
+# Function to write sequences to FASTA format
+write_fasta <- function(sequences, filename) {
+  # Open file connection
+  con <- file(filename, "w")
+
+  # Loop through sequences and write to file
+  for (i in seq(length(sequences)/2)) {
+    cat(sequences[i*2-1], "\n", sequences[i*2], "\n", file = con)
+  }
+
+  # Close file connection
+  close(con)
+}
+
+# Usage: Save sequences as a FASTA file
+write_fasta(sequences, "FILE_NAME.fasta")
+
+
+# If not done on the HPC, run only once: 
+
+system("gunzip /Volumes/Expansion/Metaphlan4_Analysis/ref/refseq/release/bacteria/*") # has already been done
+system("cat /Volumes/Expansion/Metaphlan4_Analysis/ref/refseq/release/bacteria/*.fna > /Volumes/Shield4TB/Users/evangw/Desktop/bacteria_all.fasta")
+
+# This worked and over 3 hours (using external USB-3 drive, internal SSD) and created a 1.5 TB merged file. 
+
+# Do it only once if not done yet 
+reference <- '/Volumes/CecumData/bacteria_all.fasta'
+
+# To makeblast DB, you need to install Blast+ from NCBI, from here: https://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/LATEST/ 
+# make sure it matches your computer's architecture.
+
+makeblastdb(reference, dbtype='nucl', args="-parse_seqids")
+
+# Do this line every time you reopen R 
+
+bl <- blast(db='/Volumes/CecumData/final_db_blast/bacteria_all.fasta', type='blastn')
+
+
+# Execute blast 
+
+seq_SGB35575 <- readDNAStringSet("FILE_NAMEfasta")
+
+cl_SGB35575 <- predict(bl, seq_SGB35575)
+
+accid_SGB35575 <- as.character(cl_SGB35575$sseqid)
+
+
+ids_SGB35575 <-accessionToTaxa(accid_SGB35575, "/Volumes/Expansion/Metaphlan4_Analysis/accessionTaxa.sql")
+
+# bind BLAST hits and taxonomy table
+
+taxaNodes<-read.nodes('/Volumes/Expansion/Metaphlan4_Analysis/nodes.dmp')
+taxaNames<-read.names("/Volumes/Expansion/Metaphlan4_Analysis/names.dmp")
+
+taxlist_SGB35575 =getTaxonomy(ids_SGB35575, taxaNodes, taxaNames)
+
+# create blast table with attributed taxa
+
+cltax_SGB35575=cbind(cl_SGB35575,taxlist_SGB35575) 
+
+write.csv(cltax_SGB35575, "cltax_SGB35575.csv")
+
+
+colnames(cltax_SGB35575)
+
+# barplot of the top hits and their percentage identity
+ggplot(data=cltax_SGB35575) + 
+  geom_boxplot(aes(x=order, y=pident)) + 
+  theme(axis.text.x = element_text(angle=90)) +
+  ylim(c(85,100))
+
+
+# remove short sequence length and large evalues
+
+cltax_SGB35575_Filtered <- cltax_SGB35575[cltax_SGB35575 $length > 200,]
+cltax_SGB35575_Filtered <- cltax_SGB35575_Filtered[cltax_SGB35575_Filtered$evalue < 0.01,]
+
+# split by qseqid to obtain hits from each segment separately
+
+Split_cltax_SGB35575  <- cltax_SGB35575_Filtered %>%
+  group_split(qseqid)
+
+
+# compute count and evalue_median for each segment to identify the most probable hits
+
+genus_cltax_SGB35575 <- list() 
+genus_cltax_SGB35575_evalue <- list() 
+genus_cltax_SGB35575_count<- list()
+
+
+for (i in 1:length(Split_cltax_SGB35575)) { 
+  genus_cltax_SGB35575[[i]]<- Split_cltax_SGB35575[[i]] %>%
+  group_split(genus)
+  genus_cltax_SGB35575_evalue[[i]] <- list() 
+  genus_cltax_SGB35575_count[[i]] <- list()
+ 
+  for (j in 1:length(genus_cltax_SGB35575[[i]])) {
+    sublist <- genus_cltax_SGB35575[[i]][[j]]
+    evalue_median <- median(sublist$evalue) 
+    count_genus <-  sublist %>%
+      count(qseqid,order,family,genus)
+    genus_cltax_SGB35575_count[[i]][[j]] <-count_genus
+    genus_cltax_SGB35575_evalue[[i]][[j]] <- evalue_median
+   
+     
+  }
+  
+}
+
+count<-as.data.frame(unlist(genus_cltax_SGB35575_count))
+count <-data.frame(SeqID = count$`unlist(genus_cltax_SGB35575_count)`[c(TRUE, FALSE, FALSE,FALSE,FALSE)], 
+           order = count$`unlist(genus_cltax_SGB35575_count)`[c(FALSE, TRUE, FALSE,FALSE,FALSE)],
+            family = count$`unlist(genus_cltax_SGB35575_count)`[c(FALSE, FALSE, TRUE,FALSE,FALSE)],
+                 genus = count$`unlist(genus_cltax_SGB35575_count)`[c(FALSE, FALSE, FALSE,TRUE,FALSE)],
+            count = count$`unlist(genus_cltax_SGB35575_count)`[c(FALSE, FALSE,FALSE,FALSE,TRUE)])
+evalue<-as.data.frame(unlist(genus_cltax_SGB35575_evalue))
+colnames(evalue) = "evalue"
+Blast_SGB35575 <- cbind(count,evalue)
+
+
+
+write.xlsx(Blast_SGB35575, file="Blast_Results.xlsx", sheetName="sheet1", append=TRUE, row.names=FALSE)
+
+
