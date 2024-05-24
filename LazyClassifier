@@ -1,0 +1,121 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Wed Apr 24 07:49:44 2024
+
+@author: emelinepa
+"""
+
+## classification 
+import lazypredict
+from lazypredict.Supervised import LazyClassifier
+from sklearn.model_selection import train_test_split
+import pandas as pd 
+import numpy as np
+import statistics
+import pickle
+import matplotlib.pyplot as plt
+import seaborn as sns
+import os
+
+
+file_path= '/Users/emelinepa/ownCloud - Emeline Pansart@owncloud.lcsb.uni.lu/Data/3_data_Liver_OmicEarTags_Cols.csv'
+# Read the file into a DataFrame
+data = pd.read_csv(file_path,index_col=0)
+
+file_path_pheno='/Users/emelinepa/Documents/University/4th_semester/Z_Data_final.csv'
+pheno = pd.read_csv(file_path_pheno,index_col=0)
+
+
+pheno = pheno.align(data, axis=1, join='inner')[0]
+data = data.reindex(columns=pheno.columns)
+
+
+# Convert the DataFrame to a numpy array
+data_array = data.values
+# transpose
+data_array=data_array.transpose()
+
+# Convert the DataFrame to a numpy array
+pheno_array = pheno.values
+# Select a specific variable by its index
+Taxa = (pheno_array[77]) # Duncaniella
+median = statistics.median(Taxa)
+high = np.where(Taxa > median, 'high', 'low')
+
+
+# X_train, X_test,y_train, y_test = train_test_split(data_array,high,test_size=.5,random_state =123)
+# clf = LazyClassifier(verbose=0,ignore_warnings=True, custom_metric=None)
+
+# models_CLF,predictions_CLF = clf.fit(X_train, X_test, y_train, y_test)
+
+# models_CLF.to_csv('models_CLF_WAT.csv', index=True)
+
+## Run it 100 times and then boxplot 
+
+directory = "/Users/emelinepa/Documents/University/4th_semester/lazyPredict/model_duncaniella"
+
+
+for i in range(100):
+    # Splitting the data
+    X_train, X_test, y_train, y_test = train_test_split(data_array, high, test_size=0.5, random_state=i)
+    
+    # Creating LazyClassifier
+    clf = LazyClassifier(verbose=0, ignore_warnings=True, custom_metric=None)
+    
+    # Fitting the model
+    models_CLF, predictions_CLF = clf.fit(X_train, X_test, y_train, y_test)
+    
+    # Saving the models and predictions with a unique identifier
+    models_filename = os.path.join(directory, f"models_CLF_{i}.pkl")
+    predictions_filename = os.path.join(directory, f"predictions_CLF_{i}.pkl")
+    
+    # Saving models and predictions
+    with open(models_filename, 'wb') as f:
+        pickle.dump(models_CLF, f)
+        
+    with open(predictions_filename, 'wb') as f:
+        pickle.dump(predictions_CLF, f)
+        
+# open all the models files 
+
+# Initialize an empty DataFrame to store merged predictions
+merged_predictions = pd.DataFrame()
+
+# Loop through each model file
+for i in range(100):
+    models_filename = os.path.join(directory, f"models_CLF_{i}.pkl")
+    
+    # Load the model
+    with open(models_filename, 'rb') as f:
+        model = pickle.load(f)
+    
+    # Check if the loaded object is a DataFrame
+    if isinstance(model, pd.DataFrame):
+        # If it's a DataFrame, assume it contains predictions
+        model_name = f"Model_{i}"
+        predictions_model = model  # Assuming the DataFrame already contains predictions
+    else: 
+        continue  # Skip to the next iteration of the loop
+    
+    # Merge the predictions with the merged_predictions DataFrame
+    if merged_predictions.empty:
+        merged_predictions = predictions_model
+    else:
+        merged_predictions = pd.concat([merged_predictions, predictions_model], axis=1)
+        
+accuracy_columns = merged_predictions.loc[:, merged_predictions.columns.str.strip() == 'Accuracy']
+
+merged_accuracy = accuracy_columns.copy()
+
+transposed_accuracy = merged_accuracy.T
+
+
+transposed_accuracy.boxplot(figsize=(10, 6))
+plt.title('Box plot of Accuracy for Each Model')
+plt.xlabel('Model')
+plt.ylabel('Accuracy')
+plt.xticks(rotation=90)  
+plt.rcParams['pdf.fonttype'] = 42 
+plt.savefig('lazy_predict_boxplot_duncaniella_final.pdf', bbox_inches='tight')
+plt.show()
