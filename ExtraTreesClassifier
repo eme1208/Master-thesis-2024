@@ -1,0 +1,330 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Apr 18 10:30:41 2024
+
+@author: emelinepa
+"""
+
+
+## classification 
+from sklearn.model_selection import train_test_split
+import pandas as pd 
+import numpy as np
+import statistics
+from sklearn.ensemble import ExtraTreesClassifier
+from sklearn.datasets import make_classification
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.model_selection import KFold, cross_val_score
+from sklearn.model_selection import cross_val_score
+from sklearn.metrics import confusion_matrix
+from sklearn.metrics import roc_auc_score, accuracy_score
+import matplotlib.pyplot as plt
+from collections import Counter
+
+
+file_path= '/Users/emelinepa/ownCloud - Emeline Pansart@owncloud.lcsb.uni.lu/Data/3_data_Liver_OmicEarTags_Cols.csv'
+# Read the file into a DataFrame
+data = pd.read_csv(file_path,index_col=0)
+
+file_path_pheno='/Users/emelinepa/Documents/University/4th_semester/Z_Data_final.csv'
+pheno = pd.read_csv(file_path_pheno,index_col=0)
+
+
+pheno = pheno.align(data, axis=1, join='inner')[0]
+data = data.reindex(columns=pheno.columns)
+
+
+# Convert the DataFrame to a numpy array
+data_array = data.values
+# transpose
+data_array=data_array.transpose()
+
+# Convert the DataFrame to a numpy array
+pheno_array = pheno.values
+# Select a specific variable by its index
+Taxa = (pheno_array[77]) # Duncaniella 
+median = statistics.median(Taxa)
+high = np.where(Taxa > median, 'high', 'low')
+
+X_train, X_test,y_train, y_test = train_test_split(data_array,high,test_size=.4,random_state =123)
+
+# Find the best n_estimators
+
+# Initialize the performance metric
+performance = []
+
+# Iterate over the hyperparameters
+for n_estimators in [20, 50, 100, 200]:
+  # Train and evaluate the model with the current hyperparameter
+  model = ExtraTreesClassifier(n_estimators=n_estimators, random_state=0)
+  model.fit(X_train, y_train)
+  y_pred = model.predict(X_test)
+  y_prob = model.predict_proba(X_test)[:, 1] 
+  auc = roc_auc_score(y_test, y_prob)
+  score = model.score(X_test, y_test)
+
+  # Store the performance metric
+  performance.append((n_estimators, auc, score))
+
+
+# Find the hyperparameter with the best performance
+best_hyperparameter = max(performance, key=lambda x: x[1])
+print("Best hyperparameter:", best_hyperparameter)
+# Best hyperparameter: (100, 0.885057471264368, 0.7741935483870968)
+
+# Do cross validation only on the train data set, do not touch the test one 
+
+clf = ExtraTreesClassifier(n_estimators=100, random_state=0)
+
+k_folds = KFold(n_splits = 5) # split with no over lap 
+
+scores = cross_val_score(clf, X_train, y_train, cv=k_folds)
+scores
+# array([0.73684211, 0.83333333, 0.61111111, 0.72222222, 0.77777778])
+
+clf.fit(X_train, y_train)
+y_pred = clf.predict(X_test)
+
+y_prob = clf.predict_proba(X_test)[:, 1] 
+auc = roc_auc_score(y_test, y_prob)
+print("AUC:", auc)
+# 0.885057471264368
+
+accuracy = clf.score(X_test, y_test)
+# 0.7741935483870968
+
+## Compare the resutls from the model to the actual value 
+
+equal = (y_pred == y_test).all()
+print("Are the predicted values equal to the actual values?", equal) # FALSE
+
+accuracy_1 = (y_pred == y_test).mean()
+print("Accuracy:", accuracy_1) # 0.7741935483870968
+
+conf_matrix = confusion_matrix(y_test, y_pred)
+print("Confusion matrix:\n", conf_matrix)
+# Confusion matrix:
+# [[25  4]
+# [10 23]]
+# This will give you a table that shows the number of true positives, true negatives, false positives, and false negatives. 
+
+equal_1 = (y_pred == y_test)
+print("Array of equal values:\n", equal_1)
+
+true = (equal_1 == True).mean()
+print("Proportion of true values:", true) # 0.7741935483870968
+
+false = (equal_1 == False).mean()
+print("Proportion of false values:", false) # 0.22580645161290322
+
+
+# Extract the features selected 
+
+# Get feature importances
+feature_importances = clf.feature_importances_
+
+# Access feature names from the row names of the DataFrame 'data'
+feature_names = data.index
+
+# Assuming clf is your trained model
+feature_importances = clf.feature_importances_
+
+# Create a DataFrame to store feature names and importances
+feature_importance_df = pd.DataFrame({'Feature': feature_names, 'Importance': feature_importances})
+
+# Filter out features with importance greater than 0
+filtered_df = feature_importance_df[feature_importance_df['Importance'] != 0]
+
+# Sort the DataFrame by importance (optional)
+filtered_df = filtered_df.sort_values(by='Importance', ascending=False)
+
+# Take the top 100 features
+top_100_features = filtered_df.head(100)
+
+# Print or display the top 100 features
+print(top_100_features)
+
+
+# Print the DataFrame
+print("Feature Importances:")
+print(feature_importance_df)
+
+
+feature_importance_normalized = np.std([tree.feature_importances_ for tree in
+                                        clf.estimators_],
+                                        axis = 0)
+
+
+plt.bar(data.index, feature_importance_normalized)
+plt.xlabel('Feature Labels')
+plt.ylabel('Feature Importances')
+plt.title('Comparison of different Feature Importances')
+plt.xticks(rotation=90)  
+plt.rcParams['pdf.fonttype'] = 42 
+plt.savefig('duncaniella_features_prediction.pdf', bbox_inches='tight')
+plt.show()
+
+# Do this 100% 
+
+# Initialize the lists to store the scores
+
+accuracies = []
+aucs = []
+y_probs = []
+y_preds = []
+cross_val_scores = []
+feature_importance_dfs = []
+
+# Run the loop 100 times
+
+for i in range(100):
+    # Initialize the KFold iterator
+    k_folds = KFold(n_splits=5, shuffle=True, random_state=i)
+    
+    # Initialize the model
+    clf = ExtraTreesClassifier(n_estimators=100, random_state=0)
+    
+    # Compute the cross-validated scores
+    scores_cv = cross_val_score(clf, X_train, y_train, cv=k_folds)
+    cross_val_scores.append(scores_cv)
+    
+    # Run the loop for each fold
+    for train_index, _ in k_folds.split(X_train):
+        # Train the model on the training subset for this fold
+        clf.fit(X_train[train_index], y_train[train_index])
+        
+        # Get feature importances directly from the trained model
+        feature_importances = clf.feature_importances_
+        
+        # Create a DataFrame to store feature names and importances
+        feature_importance_df = pd.DataFrame({'Feature': feature_names, 'Importance': feature_importances})
+        
+        # Filter out features with importance greater than 0
+        filtered_df = feature_importance_df[feature_importance_df['Importance'] != 0]
+        
+        # Sort the DataFrame by importance (optional)
+        filtered_df = filtered_df.sort_values(by='Importance', ascending=False)
+        
+        # Take the top 100 features
+        top_100_features = filtered_df.head(100)
+        
+        # Append feature importance DataFrame to the list
+        feature_importance_dfs.append(top_100_features)
+        
+        # Make predictions on the test set
+        y_pred = clf.predict(X_test)
+        
+        # Compute the AUC
+        y_prob = clf.predict_proba(X_test)[:, 1]
+        auc = roc_auc_score(y_test, y_prob)
+        
+        # Compute the accuracy
+        accuracy = accuracy_score(y_test, y_pred)
+        
+        # Append accuracy, AUC, predicted probabilities, and predicted labels to lists
+        accuracies.append(accuracy)
+        aucs.append(auc)
+        y_probs.append(y_prob)
+        y_preds.append(y_pred)
+
+
+# Convert lists to NumPy arrays
+# accuracies = np.array(accuracies)
+# aucs = np.array(aucs)
+# y_probs = np.array(y_probs)
+# y_preds = np.array(y_preds)
+# cross_val_scores = np.array(cross_val_scores)
+# feature_importance_df_combined = pd.concat(feature_importance_dfs, ignore_index=True)
+
+# Convert lists to DataFrames
+results_df = pd.DataFrame({
+    'Accuracy': accuracies,
+    'AUC': aucs
+})
+
+# Concatenate the list of DataFrames along axis 0 to create a single DataFrame
+feature_importance_df_combined = pd.concat(feature_importance_dfs, keys=range(100))
+
+# Optionally, convert results DataFrame to matrix
+results_matrix = results_df.values
+
+# Optionally, convert feature importance DataFrame to matrix
+feature_importance_matrix = feature_importance_df_combined.values
+
+# Convert feature importance matrix to DataFrame
+feature_importance_df = pd.DataFrame(feature_importance_matrix, columns=['Feature', 'Importance'])
+
+# Count the occurrences of each gene in the feature importance DataFrame
+gene_counts = Counter(feature_importance_df['Feature'])
+
+# Initialize lists to store gene names, counts, and associated values
+gene_names = []
+gene_count_values = []
+gene_associated_values = []
+
+# Iterate over unique genes
+for gene, count in gene_counts.items():
+    # Append gene name and count to the lists
+    gene_names.append(gene)
+    gene_count_values.append(count)
+    # Extract associated values for the current gene
+    associated_values = feature_importance_df[feature_importance_df['Feature'] == gene]['Importance'].tolist()
+    # Append associated values to the list
+    gene_associated_values.append(associated_values)
+
+# Create a new DataFrame with gene names, counts, and associated values
+feature_df = pd.DataFrame({
+    'Gene': gene_names,
+    'Count': gene_count_values,
+    'Associated_Values': gene_associated_values
+})
+
+feature_df = feature_df.sort_values(by='Count', ascending=False)
+feature_df = feature_df.reset_index(drop=True)
+
+# Initialize lists to store data for new columns
+new_columns = []
+
+# Iterate over the DataFrame in chunks of 100 rows
+for i in range(0, len(feature_importance_df), 100):
+    # Extract data for the current chunk
+    chunk_data = feature_importance_df.iloc[i:i+100]
+    # Split the chunk data into features and importances
+    chunk_features = chunk_data['Feature'].values
+    chunk_importances = chunk_data['Importance'].values
+    # Create DataFrame for the current chunk
+    chunk_df = pd.DataFrame({
+        'Feature_{}'.format(i): chunk_features,
+        'Importance_{}'.format(i): chunk_importances
+    })
+    # Append the DataFrame to the list
+    new_columns.append(chunk_df)
+
+# Concatenate the list of DataFrames along axis 1 to create new columns
+new_columns_df = pd.concat(new_columns, axis=1)
+
+# Print the DataFrame with new columns
+print(new_columns_df)
+
+
+# Print the mean and the standard deviation of the scores
+print("Mean accuracy:", np.mean(accuracies))
+print("Standard deviation of accuracy:", np.std(accuracies))
+print("Mean AUC:", np.mean(aucs))
+print("Standard deviation of AUC:", np.std(aucs))
+print("Mean cross-validated scores:", np.mean(cross_val_scores, axis=1))
+print("Standard deviation of cross-validated scores:", np.std(cross_val_scores, axis=1))
+
+
+df = pd.DataFrame(scores)
+
+df.boxplot(figsize=(10, 6))
+plt.title('Box plot of the score of teh cross validation')
+plt.xlabel('Fold')
+plt.ylabel('Scored') 
+plt.rcParams['pdf.fonttype'] = 42 
+plt.savefig('duncaniella_scores_boxplot.pdf', bbox_inches='tight')
+plt.show()
+
+
