@@ -185,7 +185,7 @@ p_1 <- ggplot(volcano_CD_vs_HF, aes(x = log2FC, y = log_10_p, color = log2FC > 0
        y = "-log10(p)") +
   theme_minimal() +
   scale_color_manual(values = c("blue", "red"),
-                     labels = c("HF", "CD")) +
+                     labels = c("CD", "HF")) +
   theme(plot.title = element_text(hjust = 0.5))
 
 
@@ -499,7 +499,7 @@ p_5 <- ggplot(volcano_CD_vs_HF_COMBAT, aes(x = log2FC, y = log_10_p, color = log
        y = "-log10(p)") +
   theme_minimal() +
   scale_color_manual(values = c("blue", "red"),
-                     labels = c("HF", "CD")) +
+                     labels = c("CD", "HF")) +
   theme(plot.title = element_text(hjust = 0.5))
 
 #ggsave("volcano_batch_samples_with_adj_p_value.pdf", plot = p_5, width = 8, height = 6, dpi = 300) # save the graph as a pdf 
