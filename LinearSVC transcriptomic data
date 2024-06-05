@@ -1,0 +1,238 @@
+
+from sklearn.model_selection import train_test_split
+import pandas as pd 
+import numpy as np
+import statistics
+from sklearn.model_selection import KFold, cross_val_score
+from sklearn.model_selection import cross_val_score
+from sklearn.metrics import confusion_matrix
+from sklearn.metrics import roc_auc_score, accuracy_score
+import matplotlib.pyplot as plt
+from collections import Counter
+from sklearn.svm import LinearSVC
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.datasets import make_classification
+
+file_path= '/Users/emelinepa/ownCloud - Emeline Pansart@owncloud.lcsb.uni.lu/Data/3_data_Liver_OmicEarTags_Cols.csv'
+# Read the file into a DataFrame
+data = pd.read_csv(file_path,index_col=0)
+
+file_path_pheno='/Users/emelinepa/Documents/University/4th_semester/Z_Data_final.csv'
+pheno = pd.read_csv(file_path_pheno,index_col=0)
+
+
+pheno = pheno.align(data, axis=1, join='inner')[0]
+data = data.reindex(columns=pheno.columns)
+
+
+# Convert the DataFrame to a numpy array
+data_array = data.values
+# transpose
+data_array=data_array.transpose()
+
+# Convert the DataFrame to a numpy array
+pheno_array = pheno.values
+# Select a specific variable by its index
+Taxa = (pheno_array[77]) # Duncaniella 
+median = statistics.median(Taxa)
+high = np.where(Taxa > median, 'high', 'low')
+
+X_train, X_test,y_train, y_test = train_test_split(data_array,high,test_size=.4,random_state =123)
+
+clf = make_pipeline(StandardScaler(), LinearSVC(dual="auto", random_state=0, tol=1e-5))
+
+k_folds = KFold(n_splits = 5) # split with no over lap 
+
+scores = cross_val_score(clf, X_train, y_train, cv=k_folds)
+scores
+# array([0.73684211, 0.77777778, 0.61111111, 0.77777778, 0.77777778])
+
+clf.fit(X_train, y_train)
+y_pred = clf.predict(X_test)
+
+# Transform high and low into numerics value to calcualte the AUC 
+
+label_map = {"high": 1, "low": 0}
+y_test_numeric = np.array([label_map[label] for label in y_test])
+y_pred_numeric = np.array([label_map[label] for label in y_pred])
+
+auc = roc_auc_score(y_test_numeric, y_pred_numeric)
+print("AUC:", auc)
+# 0.885057471264368
+
+accuracy = clf.score(X_test, y_test)
+# 0.8270637408568443
+
+## Compare the resutls from the model to the actual value 
+
+equal = (y_pred == y_test).all()
+print("Are the predicted values equal to the actual values?", equal) # FALSE
+
+accuracy_1 = (y_pred == y_test).mean()
+print("Accuracy:", accuracy_1) # 0.8225806451612904
+
+conf_matrix = confusion_matrix(y_test, y_pred)
+print("Confusion matrix:\n", conf_matrix)
+# Confusion matrix:
+# [[26  3]
+# [ 8 25]]
+# This will give you a table that shows the number of true positives, true negatives, false positives, and false negatives. 
+
+equal_1 = (y_pred == y_test)
+print("Array of equal values:\n", equal_1)
+
+true = (equal_1 == True).mean()
+print("Proportion of true values:", true) # 0.8225806451612904
+
+false = (equal_1 == False).mean()
+print("Proportion of false values:", false) # 0.1774193548387097
+
+## Loop 100 times 
+
+feature_names = data.index
+
+accuracies = []
+aucs = []
+y_preds = []
+cross_val_scores = []
+feature_importance_dfs = []
+
+for i in range(100):
+    # Initialize the KFold iterator
+    k_folds = KFold(n_splits=5, shuffle=True, random_state=i)
+    
+    # Initialize the model
+    clf = make_pipeline(StandardScaler(), LinearSVC(dual="auto", random_state=0, tol=1e-5))
+    
+    # Compute the cross-validated scores
+    scores_cv = cross_val_score(clf, X_train, y_train, cv=k_folds)
+    cross_val_scores.append(scores_cv)
+    
+    # Run the loop for each fold
+    for train_index, _ in k_folds.split(X_train):
+        # Train the model on the training subset for this fold
+        clf.fit(X_train[train_index], y_train[train_index])
+        
+        # Get feature importances directly from the trained model
+        feature_importances = clf.named_steps['linearsvc'].coef_[0]
+        
+        # Create a DataFrame to store feature names and importances
+        feature_importance_df = pd.DataFrame({'Feature': feature_names, 'Importance': feature_importances})
+        
+        # Filter out features with importance greater than 0
+        filtered_df = feature_importance_df[feature_importance_df['Importance'] != 0]
+        
+        # Sort the DataFrame by importance (optional)
+        filtered_df = filtered_df.sort_values(by='Importance', ascending=False)
+        
+        # Take the top 100 features
+        top_100_features = filtered_df.head(100)
+        
+        # Append feature importance DataFrame to the list
+        feature_importance_dfs.append(top_100_features)
+        
+        # Make predictions on the test set
+        y_pred = clf.predict(X_test)
+        
+        # Compute the AUC
+        # Transform high and low into numeric values
+        label_map = {"high": 1, "low": 0}
+        y_test_numeric = np.array([label_map[label] for label in y_test])
+        y_pred_numeric = np.array([label_map[label] for label in y_pred])
+        auc = roc_auc_score(y_test_numeric, y_pred_numeric)
+        
+        # Compute the accuracy
+        accuracy = accuracy_score(y_test_numeric, y_pred_numeric)
+        
+        # Append accuracy, AUC, predicted probabilities, and predicted labels to lists
+        accuracies.append(accuracy)
+        aucs.append(auc)
+        y_preds.append(y_pred_numeric)
+        
+# Convert lists to NumPy arrays
+# accuracies = np.array(accuracies)
+# aucs = np.array(aucs)
+# y_probs = np.array(y_probs)
+# cross_val_scores = np.array(cross_val_scores)
+# feature_importance_df_combined = pd.concat(feature_importance_dfs, ignore_index=True)
+
+# Convert lists to DataFrames
+results_df = pd.DataFrame({
+    'Accuracy': accuracies,
+    'AUC': aucs
+})
+
+# Concatenate the list of DataFrames along axis 0 to create a single DataFrame
+feature_importance_df_combined = pd.concat(feature_importance_dfs, keys=range(100))
+
+# Optionally, convert results DataFrame to matrix
+results_matrix = results_df.values
+
+# Optionally, convert feature importance DataFrame to matrix
+feature_importance_matrix = feature_importance_df_combined.values
+
+# Convert feature importance matrix to DataFrame
+feature_importance_df = pd.DataFrame(feature_importance_matrix, columns=['Feature', 'Importance'])
+
+# Count the occurrences of each gene in the feature importance DataFrame
+gene_counts = Counter(feature_importance_df['Feature'])
+
+# Initialize lists to store gene names, counts, and associated values
+gene_names = []
+gene_count_values = []
+gene_associated_values = []
+
+# Iterate over unique genes
+for gene, count in gene_counts.items():
+    # Append gene name and count to the lists
+    gene_names.append(gene)
+    gene_count_values.append(count)
+    # Extract associated values for the current gene
+    associated_values = feature_importance_df[feature_importance_df['Feature'] == gene]['Importance'].tolist()
+    # Append associated values to the list
+    gene_associated_values.append(associated_values)
+
+# Create a new DataFrame with gene names, counts, and associated values
+feature_df = pd.DataFrame({
+    'Gene': gene_names,
+    'Count': gene_count_values,
+    'Associated_Values': gene_associated_values
+})
+
+feature_df = feature_df.sort_values(by='Count', ascending=False)
+feature_df = feature_df.reset_index(drop=True)
+
+# Initialize lists to store data for new columns
+new_columns = []
+
+# Iterate over the DataFrame in chunks of 100 rows
+for i in range(0, len(feature_importance_df), 100):
+    # Extract data for the current chunk
+    chunk_data = feature_importance_df.iloc[i:i+100]
+    # Split the chunk data into features and importances
+    chunk_features = chunk_data['Feature'].values
+    chunk_importances = chunk_data['Importance'].values
+    # Create DataFrame for the current chunk
+    chunk_df = pd.DataFrame({
+        'Feature_{}'.format(i): chunk_features,
+        'Importance_{}'.format(i): chunk_importances
+    })
+    # Append the DataFrame to the list
+    new_columns.append(chunk_df)
+
+# Concatenate the list of DataFrames along axis 1 to create new columns
+new_columns_df = pd.concat(new_columns, axis=1)
+
+new_columns_df.to_csv('new_columns_df_transcriptomic.csv', sep=',', index=False, encoding='utf-8')
+feature_df.to_csv('feature_df_SCV_linear_transcriptomic.csv', sep=',', index=False, encoding='utf-8')
+
+
+# Print the mean and the standard deviation of the scores
+print("Mean accuracy:", np.mean(accuracies)) # 0.7991935483870967 
+print("Standard deviation of accuracy:", np.std(accuracies)) # 0.034815927437451176
+print("Mean AUC:", np.mean(aucs)) # 0.8035057471264367
+print("Standard deviation of AUC:", np.std(aucs)) # 0.03501263938377611
+print("Mean cross-validated scores:", np.mean(cross_val_scores, axis=1))
+print("Standard deviation of cross-validated scores:", np.std(cross_val_scores, axis=1))
+
