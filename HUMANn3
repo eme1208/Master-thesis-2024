@@ -70,4 +70,4 @@ rsync --rsh='ssh -p 8022' COMPUTER_DIRECTORY/FILE_NAME -avp HPC_ID@access-iris.u
 
 conda activate biobakery3
 
-humann_barplot --input pathabundance_norm_stratified_meta.tsv --focal-metadata PHENOTYPE --last-metadata PHENOTYPE --sort sum metadata --scaling logstack --focal-feature PATHWAY --output NAME.pdf
+humann_barplot --input pathabundance_norm_stratified_meta.tsv --focal-metadata PHENOTYPE --last-metadata PHENOTYPE --sort sum metadata --scaling logstack --focal-feature PATHWAY --as-genera --top-taxa 18 --output NAME.pdf
