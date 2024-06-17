@@ -44,7 +44,7 @@ conda deactivate
 
 conda activate biobakery3
 
-humann_renorm_table --input joint_pathabundance.tsv --unit cpm --output pathabundance_norm.tsv
+humann_renorm_table --input joint_pathabundance.tsv --unit relab --output pathabundance_norm.tsv
 
 # Data stratification
 
